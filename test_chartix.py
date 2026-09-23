@@ -1,23 +1,32 @@
 import requests
-import re
-JS_URL = "https://chartix.ir/_nuxt/BlP3i0K2.js"
+import json
+BASE = "https://market.chartix.ir"
 headers = {
     "User-Agent": "Mozilla/5.0",
-    "Accept": "*/*",
+    "Accept": "application/json",
 }
-print("Downloading Chartix JS...")
-r = requests.get(JS_URL, headers=headers, timeout=60)
-print("STATUS:", r.status_code)
-print("SIZE:", len(r.text))
-js = r.text
-target = "market.chartix.ir/symbol/info/"
-pos = js.find(target)
-if pos == -1:
-    print("TARGET NOT FOUND")
-    exit()
-print("\nTARGET FOUND AT:", pos)
-start = max(0, pos - 3000)
-end = min(len(js), pos + 3000)
-print("\n================ CONTEXT ================\n")
-print(js[start:end])
-print("\n==========================================")
+tests = [
+    ("اهرم", "BRS0010747"),
+    ("خودرو", "BRS0010395"),
+    ("شستا", "BRS0010496"),
+    ("وبملت", "BRS0010596"),
+]
+for name, ticker in tests:
+    url = f"{BASE}/symbol/info/saham/{ticker}"
+    print("\n" + "=" * 60)
+    print("SYMBOL:", name)
+    print("TICKER:", ticker)
+    print("URL:", url)
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+        print("STATUS:", r.status_code)
+        print("TYPE:", r.headers.get("content-type"))
+        if r.status_code == 200:
+            data = r.json()
+            print("\nRESPONSE:")
+            print(json.dumps(data, ensure_ascii=False, indent=2)[:10000])
+        else:
+            print("\nERROR:")
+            print(r.text[:3000])
+    except Exception as e:
+        print("ERROR:", type(e).__name__, e)
