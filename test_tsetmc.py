@@ -1,38 +1,45 @@
-import requests
+import subprocess
 
-URLS = [
-    "https://brsapi.ir/bourse-api-option-webservice/",
-    "https://api.brsapi.ir/",
-    "https://brsapi.ir/api/",
+urls = [
+    "https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/%D8%AE%D9%88%D8%AF%D8%B1%D9%88",
+    "https://webgw.tse.ir/InstrumentProvider/api/v1/MarketWatch/MarketWatchOption/fa",
 ]
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "*/*",
-}
-
 print("====================================")
-print("BRSAPI OPTION DISCOVERY TEST")
+print("TSETMC IPV4 CONNECTION TEST")
 print("====================================")
 
-for url in URLS:
+for url in urls:
     print("\n------------------------------------")
     print("URL:", url)
 
+    cmd = [
+        "curl",
+        "-4",
+        "-L",
+        "--connect-timeout", "10",
+        "--max-time", "20",
+        "-A", "Mozilla/5.0",
+        "-H", "Accept: application/json",
+        "-sS",
+        "-w", "\nHTTP_STATUS:%{http_code}\nREMOTE_IP:%{remote_ip}\n",
+        url
+    ]
+
     try:
-        r = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=(10, 20),
-            allow_redirects=True
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30
         )
 
-        print("STATUS:", r.status_code)
-        print("FINAL URL:", r.url)
-        print("CONTENT TYPE:", r.headers.get("content-type"))
-        print("LENGTH:", len(r.content))
-        print("BODY:")
-        print(r.text[:5000])
+        print("OUTPUT:")
+        print(result.stdout[:5000])
+
+        if result.stderr:
+            print("STDERR:")
+            print(result.stderr[:2000])
 
     except Exception as e:
         print("ERROR:", repr(e))
