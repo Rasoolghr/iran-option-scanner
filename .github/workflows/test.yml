@@ -23,3 +23,6 @@ jobs:
 
       - name: Test TSETMC
         run: python test_tsetmc.py
+        - name: Test Chartix
+          run: python test_chartix.py
+
