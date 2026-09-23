@@ -1,32 +1,26 @@
 import requests
-import json
-BASE = "https://market.chartix.ir"
-headers = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json",
-}
-tests = [
-    ("اهرم", "BRS0010747"),
-    ("خودرو", "BRS0010395"),
-    ("شستا", "BRS0010496"),
-    ("وبملت", "BRS0010596"),
+import re
+JS_URL = "https://chartix.ir/_nuxt/BlP3i0K2.js"
+r = requests.get(
+    JS_URL,
+    headers={"User-Agent": "Mozilla/5.0"},
+    timeout=60
+)
+js = r.text
+patterns = [
+    "market.chartix.ir",
+    "/quote/",
+    "/price/",
+    "/market/",
+    "/ticker/",
+    "/trade/",
+    "/ohlc/",
+    "/history/"
 ]
-for name, ticker in tests:
-    url = f"{BASE}/symbol/info/saham/{ticker}"
-    print("\n" + "=" * 60)
-    print("SYMBOL:", name)
-    print("TICKER:", ticker)
-    print("URL:", url)
-    try:
-        r = requests.get(url, headers=headers, timeout=30)
-        print("STATUS:", r.status_code)
-        print("TYPE:", r.headers.get("content-type"))
-        if r.status_code == 200:
-            data = r.json()
-            print("\nRESPONSE:")
-            print(json.dumps(data, ensure_ascii=False, indent=2)[:10000])
-        else:
-            print("\nERROR:")
-            print(r.text[:3000])
-    except Exception as e:
-        print("ERROR:", type(e).__name__, e)
+for p in patterns:
+    print("\n================", p, "================")
+    positions = [m.start() for m in re.finditer(re.escape(p), js)]
+    print("COUNT:", len(positions))
+    for pos in positions[:5]:
+        print("\n---")
+        print(js[max(0,pos-300):pos+500])
