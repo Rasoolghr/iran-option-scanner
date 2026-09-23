@@ -1,50 +1,55 @@
 import requests
 import re
 from urllib.parse import urljoin
-URL = "https://chartix.ir/market/saham-option"
+PAGE = "https://chartix.ir/market/saham-option"
 s = requests.Session()
 s.headers["User-Agent"] = "Mozilla/5.0"
-r = s.get(URL, timeout=30)
+r = s.get(PAGE, timeout=30)
 print("STATUS:", r.status_code)
-html = r.text
 scripts = re.findall(
     r'<script[^>]+src=["\']([^"\']+)["\']',
-    html,
+    r.text,
     re.I
 )
-found = set()
+apis = set()
 for src in scripts:
     try:
-        js = s.get(urljoin(r.url, src), timeout=20).text
-        # فقط endpointهایی که احتمالاً داده‌ای هستند
-        patterns = [
-            r'["\']([^"\']*/api/[^"\']+)["\']',
-            r'["\']([^"\']*(?:quote|quotes|ohlc|candle|candles|history|ticker|tickers|market-data|marketdata)[^"\']*)["\']',
-            r'["\'](wss?://[^"\']+)["\']',
-            r'https?://[^"\'\s<>]+',
-        ]
-        for pattern in patterns:
-            for x in re.findall(pattern, js, re.I):
-                x = x.strip()
-                # حذف موارد واضحاً نامرتبط
-                low = x.lower()
-                if any(k in low for k in [
-                    "/api/",
-                    "quote",
-                    "ohlc",
-                    "candle",
-                    "history",
-                    "ticker",
-                    "market-data",
-                    "marketdata",
-                    "wss://",
-                    "ws://"
-                ]):
-                    found.add(x)
+        js = s.get(
+            urljoin(r.url, src),
+            timeout=20
+        ).text
+        # فقط مسیرهایی که واقعاً /api/ دارند
+        matches = re.findall(
+            r'["\'`](/api/[^"\'`\\\s]{1,200})["\'`]',
+            js,
+            re.I
+        )
+        for x in matches:
+            apis.add(x)
     except:
         pass
-print("\n===== POSSIBLE DATA API =====")
-results = sorted(found)
-print("TOTAL:", len(results))
-for i, x in enumerate(results[:30], 1):
+print("\n===== API PATHS =====")
+# فقط APIهایی که احتمال ارتباط با بازار دارند
+important = []
+for x in sorted(apis):
+    low = x.lower()
+    if any(k in low for k in [
+        "symbol",
+        "market",
+        "option",
+        "quote",
+        "price",
+        "trade",
+        "order",
+        "history",
+        "candle",
+        "ohlc",
+        "chart",
+        "data",
+        "ticker",
+        "portfolio"
+    ]):
+        important.append(x)
+for i, x in enumerate(important, 1):
     print(i, x)
+print("\nTOTAL IMPORTANT:", len(important))
