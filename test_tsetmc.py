@@ -1,19 +1,20 @@
 import requests
 
-URL = "https://brsapi.ir"
+urls = [
+    "https://brsapi.ir/bourse-api-option-webservice/",
+    "https://api.brsapi.ir/",
+]
 
-print("====================================")
-print("BRSAPI CONNECTION TEST")
-print("====================================")
-print("URL:", URL)
+for url in urls:
+    print("\n==============================")
+    print("URL:", url)
 
-try:
-    r = requests.get(URL, timeout=(10, 20))
+    try:
+        r = requests.get(url, timeout=(10, 20))
+        print("STATUS:", r.status_code)
+        print("LENGTH:", len(r.content))
+        print("DATA:", r.text[:2000])
+    except Exception as e:
+        print("ERROR:", repr(e))
 
-    print("STATUS:", r.status_code)
-    print("LENGTH:", len(r.content))
-    print("DATA:", r.text[:1000])
-
-except Exception as e:
-    print("FAILED")
-    print("ERROR:", repr(e))
+print("\nTEST FINISHED")
