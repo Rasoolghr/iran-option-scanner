@@ -2,7 +2,7 @@ import requests
 import json
 URL = "https://chartix.ir/api/symbols/search"
 params = {
-    "query": "خودرو"
+    "q": "خودرو"
 }
 headers = {
     "User-Agent": "Mozilla/5.0",
