@@ -1,4 +1,3 @@
-
 import requests
 
 HEADERS = {
@@ -8,40 +7,27 @@ HEADERS = {
     "Origin": "https://www.tsetmc.com",
 }
 
-TESTS = [
-    (
-        "CDN",
-        "https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/%D8%A7%D9%87%D8%B1%D9%85",
-    ),
-    (
-        "OPTION_GATEWAY",
-        "https://webgw.tse.ir/InstrumentProvider/api/v1/MarketWatch/MarketWatchOption/fa",
-    ),
+URLS = [
+    "https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/%D8%A7%D9%87%D8%B1%D9%85",
+    "https://cdn10.tsetmc.com/api/Instrument/GetInstrumentSearch/%D8%A7%D9%87%D8%B1%D9%85",
 ]
 
-for name, url in TESTS:
-    print(f"\n=== {name} ===")
+for url in URLS:
+    print("\n==============================")
     print("URL:", url)
 
     try:
         r = requests.get(
             url,
             headers=HEADERS,
-            timeout=(10, 30)
+            timeout=(10, 20)
         )
 
-        print("HTTP STATUS:", r.status_code)
-        print("CONTENT LENGTH:", len(r.content))
-        print("RESPONSE:", r.text[:1500])
+        print("STATUS:", r.status_code)
+        print("LENGTH:", len(r.content))
+        print("DATA:", r.text[:2000])
 
-        if r.ok:
-            print("RESULT: PASS")
-        else:
-            print("RESULT: HTTP FAILURE")
-
-    except requests.exceptions.RequestException as e:
-        print("RESULT: NETWORK FAILURE")
+    except Exception as e:
         print("ERROR:", repr(e))
 
-
-print("\nTest completed.")
+print("\nTEST FINISHED")
