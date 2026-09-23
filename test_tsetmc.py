@@ -1,26 +1,18 @@
-import tse_option as tso
+import requests
+
+URL = "https://brsapi.ir"
 
 print("====================================")
-print("TSE OPTION REAL DATA TEST")
+print("BRSAPI CONNECTION TEST")
 print("====================================")
+print("URL:", URL)
 
 try:
-    df = tso.option_chain(
-        symbol="خودرو",
-        trading_days=100,
-        IV=False,
-        leverage=True,
-        P_BSM=False,
-        sort="Maturity"
-    )
+    r = requests.get(URL, timeout=(10, 20))
 
-    print("SUCCESS")
-    print("ROWS:", len(df))
-    print("COLUMNS:")
-    print(list(df.columns))
-
-    print("\nFIRST 10 ROWS:")
-    print(df.head(10).to_string())
+    print("STATUS:", r.status_code)
+    print("LENGTH:", len(r.content))
+    print("DATA:", r.text[:1000])
 
 except Exception as e:
     print("FAILED")
