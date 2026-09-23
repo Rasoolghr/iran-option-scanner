@@ -21,8 +21,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Test TSETMC
-        run: python test_tsetmc.py
-        - name: Test Chartix
-          run: python test_chartix.py
+      
+       - name: Test TSETMC
+          run: python test_tsetmc.py
 
+       - name: Test Chartix
+          run: python test_chartix.py
