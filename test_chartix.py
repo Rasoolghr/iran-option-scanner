@@ -1,104 +1,90 @@
 import requests
 import re
 BASE = "https://chartix.ir"
-TICKER = "BRS0010747"      # ضهرم0125
-ALIAS = "IRO9AHRM0531"
+PAGE = BASE + "/market/saham-option"
 headers = {
     "User-Agent": "Mozilla/5.0",
-    "Accept": "*/*",
+    "Accept": "*/*"
 }
-# ---------------------------------------------------------
-# 1) تست endpointهای احتمالی با ticker و alias
-# ---------------------------------------------------------
-paths = [
-    f"/api/symbols/{TICKER}",
-    f"/api/symbol/{TICKER}",
-    f"/api/symbols/{ALIAS}",
-    f"/api/symbol/{ALIAS}",
-    f"/api/quotes/{TICKER}",
-    f"/api/quote/{TICKER}",
-    f"/api/market/{TICKER}",
-    f"/api/markets/{TICKER}",
-    f"/api/chart/{TICKER}",
-    f"/api/charts/{TICKER}",
-    f"/api/history/{TICKER}",
-    f"/api/ohlc/{TICKER}",
-    f"/api/candles/{TICKER}",
-    f"/api/data/{TICKER}",
-    f"/api/symbol-data/{TICKER}",
-]
-print("===== ENDPOINT TEST =====")
-for path in paths:
+print("===== DOWNLOAD PAGE =====")
+html = requests.get(
+    PAGE,
+    headers=headers,
+    timeout=30
+).text
+# همه فایل‌های JS
+scripts = re.findall(
+    r'<script[^>]+src=["\']([^"\']+\.js[^"\']*)',
+    html
+)
+print("JS FILES:", len(scripts))
+seen = set()
+for src in scripts:
+    if src.startswith("http"):
+        url = src
+    elif src.startswith("/"):
+        url = BASE + src
+    else:
+        url = BASE + "/" + src
+    if url in seen:
+        continue
+    seen.add(url)
+    print("\n================================")
+    print("JS:", url)
     try:
-        r = requests.get(
-            BASE + path,
+        js = requests.get(
+            url,
             headers=headers,
-            timeout=10
-        )
-        print(
-            path,
-            "=>",
-            r.status_code,
-            r.headers.get("content-type", "")
-        )
-        # فقط پاسخ‌های غیر 404 را نمایش بده
-        if r.status_code != 404:
-            print(r.text[:1000])
-    except Exception as e:
-        print(path, "=> ERROR", type(e).__name__)
-# ---------------------------------------------------------
-# 2) دریافت صفحه نماد و پیدا کردن فایل‌های JS
-# ---------------------------------------------------------
-print("\n===== JS DISCOVERY =====")
-try:
-    r = requests.get(
-        BASE + "/market/saham-option",
-        headers=headers,
-        timeout=30
-    )
-    print("PAGE STATUS:", r.status_code)
-    html = r.text
-    scripts = re.findall(
-        r'<script[^>]+src=["\']([^"\']+\.js[^"\']*)',
-        html
-    )
-    print("JS FILES:", len(scripts))
-    for src in scripts:
-        if src.startswith("/"):
-            url = BASE + src
-        elif src.startswith("http"):
-            url = src
-        else:
-            url = BASE + "/" + src
-        try:
-            js = requests.get(
-                url,
-                headers=headers,
-                timeout=20
-            ).text
-            # مسیرهای API که واقعاً داخل JS آمده‌اند
-            matches = re.findall(
-                r'["\'`]([^"\'`]*?/api/[^"\'`]+)["\'`]',
-                js
-            )
+            timeout=30
+        ).text
+        print("SIZE:", len(js))
+        # -------------------------------------------------
+        # fetch / $fetch / useFetch / axios
+        # -------------------------------------------------
+        patterns = [
+            r'\$fetch\s*\([^)]{0,500}',
+            r'fetch\s*\([^)]{0,500}',
+            r'useFetch\s*\([^)]{0,500}',
+            r'axios\.[a-zA-Z]+\s*\([^)]{0,500}',
+            r'axios\s*\([^)]{0,500}'
+        ]
+        found = set()
+        for pattern in patterns:
+            matches = re.findall(pattern, js, re.I | re.S)
             for m in matches:
-                if any(x in m.lower() for x in [
+                m = re.sub(r'\s+', ' ', m)
+                # فقط موارد مرتبط با داده بازار
+                low = m.lower()
+                if any(word in low for word in [
+                    "/api/",
                     "quote",
-                    "market",
-                    "chart",
-                    "history",
-                    "ohlc",
-                    "candle",
                     "price",
+                    "market",
                     "trade",
                     "volume",
+                    "chart",
+                    "ohlc",
+                    "candle",
+                    "history",
                     "option",
                     "openinterest",
                     "open-interest",
-                    "symbol"
+                    "order"
                 ]):
-                    print(m)
-        except:
-            pass
-except Exception as e:
-    print("JS ERROR:", type(e).__name__, e)
+                    found.add(m[:800])
+        for x in found:
+            print("\nREQUEST:")
+            print(x)
+        # -------------------------------------------------
+        # تمام رشته‌های /api/ با context
+        # -------------------------------------------------
+        print("\n===== API CONTEXT =====")
+        for match in re.finditer(r'/api/', js, re.I):
+            start = max(0, match.start() - 250)
+            end = min(len(js), match.start() + 500)
+            context = js[start:end]
+            context = re.sub(r'\s+', ' ', context)
+            print("\n---")
+            print(context[:750])
+    except Exception as e:
+        print("ERROR:", type(e).__name__, e)
