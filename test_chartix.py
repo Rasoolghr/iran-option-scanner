@@ -6,11 +6,17 @@ r = requests.get(
     headers={"User-Agent": "Mozilla/5.0"},
     timeout=30
 )
-data = r.json()
+d = r.json()
 print("STATUS:", r.status_code)
-print("\nKEYS:")
-print(list(data.keys()))
-print("\nNESTED DATA:")
-for k, v in data.items():
-    if isinstance(v, dict):
-        print(k, "=>", list(v.keys()))
+for key in [
+    "name",
+    "price",
+    "priceFormatted",
+    "change",
+    "changePercent",
+    "priceUpdatedAt",
+    "boxes",
+    "most",
+]:
+    print(f"\n===== {key} =====")
+    print(json.dumps(d.get(key), ensure_ascii=False, indent=2))
