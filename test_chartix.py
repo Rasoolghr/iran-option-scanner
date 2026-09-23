@@ -1,31 +1,23 @@
 import requests
-import json
-BASE = "https://market.chartix.ir"
+import re
+JS_URL = "https://chartix.ir/_nuxt/BlP3i0K2.js"
 headers = {
     "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json"
+    "Accept": "*/*",
 }
-# قرارداد نمونه
-ticker = "BRS0010747"
-alias = "IRO9AHRM0531"
-urls = [
-    f"{BASE}/symbol/all",
-    f"{BASE}/symbol/info/{ticker}/{alias}",
-    f"{BASE}/symbol/info/{ticker}",
-    f"{BASE}/symbol/info/{alias}",
-]
-for url in urls:
-    print("\n================================")
-    print("URL:", url)
-    try:
-        r = requests.get(
-            url,
-            headers=headers,
-            timeout=30
-        )
-        print("STATUS:", r.status_code)
-        print("TYPE:", r.headers.get("content-type"))
-        print("RESPONSE:")
-        print(r.text[:5000])
-    except Exception as e:
-        print("ERROR:", type(e).__name__, e)
+print("Downloading Chartix JS...")
+r = requests.get(JS_URL, headers=headers, timeout=60)
+print("STATUS:", r.status_code)
+print("SIZE:", len(r.text))
+js = r.text
+target = "market.chartix.ir/symbol/info/"
+pos = js.find(target)
+if pos == -1:
+    print("TARGET NOT FOUND")
+    exit()
+print("\nTARGET FOUND AT:", pos)
+start = max(0, pos - 3000)
+end = min(len(js), pos + 3000)
+print("\n================ CONTEXT ================\n")
+print(js[start:end])
+print("\n==========================================")
