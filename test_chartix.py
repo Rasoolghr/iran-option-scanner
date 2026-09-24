@@ -2,6 +2,7 @@ import requests
 import re
 import jdatetime
 import json
+from urllib.parse import urljoin
 
 
 # =========================================================
@@ -9,6 +10,7 @@ import json
 # =========================================================
 
 BASE = "https://market.chartix.ir"
+MAX_BASE = "https://max.chartix.ir"
 
 MIN_VOLUME = 50
 MIN_OPTION_PRICE = 10
@@ -17,8 +19,15 @@ ATM_PERCENT = 3
 TOP_N = 5
 
 session = requests.Session()
+
 session.headers.update({
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/140.0 Safari/537.36"
+    ),
+    "Accept": "*/*",
 })
 
 
@@ -30,12 +39,14 @@ def get_all_symbols():
 
     url = f"{BASE}/symbol/all"
 
-    r = session.get(url, timeout=30)
+    r = session.get(
+        url,
+        timeout=30
+    )
+
     r.raise_for_status()
 
-    data = r.json()
-
-    return data["data"]["symbols"]
+    return r.json()["data"]["symbols"]
 
 
 # =========================================================
@@ -47,7 +58,11 @@ def get_info(ticker):
     url = f"{BASE}/symbol/info/saham/{ticker}"
 
     try:
-        r = session.get(url, timeout=30)
+
+        r = session.get(
+            url,
+            timeout=30
+        )
 
         if r.status_code != 200:
             return None
@@ -56,20 +71,24 @@ def get_info(ticker):
 
     except Exception as e:
 
-        print("INFO ERROR:", ticker, e)
+        print(
+            "INFO ERROR:",
+            ticker,
+            e
+        )
 
         return None
 
 
 # =========================================================
-# TODAY JALALI
+# JALALI DATE
 # =========================================================
 
 def today_jalali():
 
-    today = jdatetime.date.today()
-
-    return today.strftime("%Y/%m/%d")
+    return jdatetime.date.today().strftime(
+        "%Y/%m/%d"
+    )
 
 
 # =========================================================
@@ -80,16 +99,18 @@ def is_active_expiry(expiry):
 
     try:
 
-        expiry_date = jdatetime.datetime.strptime(
-            expiry,
-            "%Y/%m/%d"
-        ).date()
+        expiry_date = (
+            jdatetime.datetime
+            .strptime(
+                expiry,
+                "%Y/%m/%d"
+            )
+            .date()
+        )
 
-        today = jdatetime.date.today()
+        return expiry_date >= jdatetime.date.today()
 
-        return expiry_date >= today
-
-    except Exception:
+    except:
 
         return False
 
@@ -103,13 +124,14 @@ def find_symbol(symbols, name):
     for s in symbols:
 
         if s.get("name") == name:
+
             return s
 
     return None
 
 
 # =========================================================
-# OPTION PARSER
+# PARSE OPTION
 # =========================================================
 
 def parse_option(description, name):
@@ -131,7 +153,7 @@ def parse_option(description, name):
 
     option_type = None
 
-    # طبق داده پروژه:
+    # پروژه:
     # ط = PUT
     # ض = CALL
 
@@ -154,33 +176,57 @@ def parse_option(description, name):
 
 
 # =========================================================
-# UNDERLYING MAPPING
+# UNDERLYING
 # =========================================================
 
 def underlying_name(option_name):
 
     mapping = {
-
         "خودرو": "خودرو",
         "هرم": "اهرم",
         "ستا": "شستا",
         "ملت": "وبملت"
-
     }
 
     for key, value in mapping.items():
 
-        if option_name.startswith("ط" + key):
+        if option_name.startswith(
+            "ط" + key
+        ):
+
             return value
 
-        if option_name.startswith("ض" + key):
+        if option_name.startswith(
+            "ض" + key
+        ):
+
             return value
 
     return None
 
 
 # =========================================================
-# GET VOLUME
+# PRICE
+# =========================================================
+
+def get_price(info):
+
+    if not info:
+        return None
+
+    try:
+
+        return float(
+            info.get("price")
+        )
+
+    except:
+
+        return None
+
+
+# =========================================================
+# VOLUME
 # =========================================================
 
 def get_volume(info):
@@ -188,15 +234,23 @@ def get_volume(info):
     if not info:
         return 0
 
-    boxes = info.get("boxes", [])
+    for box in info.get(
+        "boxes",
+        []
+    ):
 
-    for box in boxes:
-
-        title = str(box.get("title", ""))
+        title = str(
+            box.get(
+                "title",
+                ""
+            )
+        )
 
         if "حجم معاملات" in title:
 
-            value = box.get("value")
+            value = box.get(
+                "value"
+            )
 
             try:
 
@@ -214,51 +268,15 @@ def get_volume(info):
 
 
 # =========================================================
-# GET PRICE
+# OPTION CALCULATION
 # =========================================================
 
-def get_price(info):
-
-    if not info:
-        return None
-
-    value = info.get("price")
-
-    try:
-
-        return float(value)
-
-    except:
-
-        return None
-
-
-# =========================================================
-# GET UNDERLYING PRICE
-# =========================================================
-
-def get_underlying_price(symbols, underlying):
-
-    symbol = find_symbol(symbols, underlying)
-
-    if not symbol:
-        return None
-
-    ticker = symbol.get("ticker")
-
-    info = get_info(ticker)
-
-    if not info:
-        return None
-
-    return get_price(info)
-
-
-# =========================================================
-# CALCULATE OPTION DATA
-# =========================================================
-
-def calculate_option(option_price, underlying_price, strike, option_type):
+def calculate_option(
+    option_price,
+    underlying_price,
+    strike,
+    option_type
+):
 
     if option_type == "CALL":
 
@@ -274,7 +292,9 @@ def calculate_option(option_price, underlying_price, strike, option_type):
             0
         )
 
-    time_value = option_price - intrinsic
+    time_value = (
+        option_price - intrinsic
+    )
 
     if option_price <= 0:
         return None
@@ -283,44 +303,43 @@ def calculate_option(option_price, underlying_price, strike, option_type):
         return None
 
     tv_percent = (
-        time_value / option_price
+        time_value
+        / option_price
     ) * 100
 
     distance = (
-        abs(underlying_price - strike)
+        abs(
+            underlying_price - strike
+        )
         / underlying_price
     ) * 100
-
-    # Moneyness
 
     if distance <= ATM_PERCENT:
 
         moneyness = "ATM"
 
+    elif option_type == "CALL":
+
+        moneyness = (
+            "ITM"
+            if underlying_price > strike
+            else "OTM"
+        )
+
     else:
 
-        if option_type == "CALL":
-
-            if underlying_price > strike:
-                moneyness = "ITM"
-            else:
-                moneyness = "OTM"
-
-        else:
-
-            if underlying_price < strike:
-                moneyness = "ITM"
-            else:
-                moneyness = "OTM"
+        moneyness = (
+            "ITM"
+            if underlying_price < strike
+            else "OTM"
+        )
 
     return {
-
         "intrinsic": intrinsic,
         "time_value": time_value,
         "tv_percent": tv_percent,
         "distance": distance,
         "moneyness": moneyness
-
     }
 
 
@@ -337,356 +356,86 @@ def calculate_score(
 
     score = 0
 
-    # Moneyness
-
     if moneyness == "ATM":
-
         score += 40
 
     elif moneyness == "ITM":
-
         score += 30
 
     else:
-
         score += 15
 
-    # Distance
-
     if distance <= 2:
-
         score += 25
 
     elif distance <= 5:
-
         score += 18
 
     elif distance <= 8:
-
         score += 10
 
-    # Volume
-
     if volume >= 1000:
-
         score += 20
 
     elif volume >= 500:
-
         score += 15
 
     elif volume >= 100:
-
         score += 10
 
     elif volume >= 50:
-
         score += 5
 
-    # Time value
-
     if tv_percent >= 70:
-
         score += 15
 
     elif tv_percent >= 50:
-
         score += 10
 
     elif tv_percent >= 30:
-
         score += 5
 
     return score
 
 
 # =========================================================
-# TEST SYMBOL INFO
+# FIND UNDERLYING PRICE
 # =========================================================
 
-def test_symbol_info(symbols, names):
-
-    print()
-    print("=" * 70)
-    print("SYMBOL INFO TEST")
-    print("=" * 70)
-
-    for name in names:
-
-        symbol = find_symbol(symbols, name)
-
-        if not symbol:
-
-            print(name, "NOT FOUND")
-            continue
-
-        ticker = symbol.get("ticker")
-
-        info = get_info(ticker)
-
-        print()
-        print(name)
-        print("Ticker:", ticker)
-
-        if not info:
-
-            print("INFO FAILED")
-            continue
-
-        print(
-            "KEYS:",
-            list(info.keys())
-        )
-
-        print(
-            "Price:",
-            info.get("price")
-        )
-
-        print(
-            "Description:",
-            info.get("description")
-        )
-
-
-# =========================================================
-# TEST POSSIBLE CHART ENDPOINTS
-# =========================================================
-
-def test_chart_endpoints(symbols):
-
-    print()
-    print("=" * 70)
-    print("CHARTIX CANDLE ENDPOINT TEST")
-    print("=" * 70)
+def get_underlying_price(
+    symbols,
+    underlying
+):
 
     symbol = find_symbol(
         symbols,
-        "وبملت"
+        underlying
     )
 
     if not symbol:
+        return None
 
-        print("وبملت پیدا نشد")
-
-        return
-
-    ticker = symbol.get("ticker")
-
-    print("Ticker:", ticker)
-
-    endpoints = [
-
-        f"/symbol/chart/{ticker}",
-        f"/symbol/charts/{ticker}",
-        f"/symbol/history/{ticker}",
-        f"/symbol/candle/{ticker}",
-        f"/symbol/candles/{ticker}",
-        f"/symbol/ohlc/{ticker}",
-
-        f"/chart/{ticker}",
-        f"/charts/{ticker}",
-        f"/history/{ticker}",
-        f"/candles/{ticker}",
-        f"/ohlc/{ticker}",
-
-    ]
-
-    for endpoint in endpoints:
-
-        url = BASE + endpoint
-
-        try:
-
-            r = session.get(
-                url,
-                timeout=10
-            )
-
-            content_type = r.headers.get(
-                "content-type",
-                ""
-            )
-
-            print()
-            print(
-                f"{endpoint:<45} "
-                f"STATUS={r.status_code} "
-                f"TYPE={content_type}"
-            )
-
-            if r.status_code == 200:
-
-                text = r.text[:2000]
-
-                print("  RESPONSE:")
-                print(text)
-
-        except Exception as e:
-
-            print()
-            print(
-                f"{endpoint:<45} "
-                f"ERROR={e}"
-            )
-
-
-# =========================================================
-# DISCOVER CHART/CANDLE KEYS IN INFO
-# =========================================================
-
-def inspect_chart_keys(symbols):
-
-    print()
-    print("=" * 70)
-    print("CHART DATA KEY INSPECTION")
-    print("=" * 70)
-
-    targets = [
-        "طملت8075",
-        "وبملت"
-    ]
-
-    keywords = [
-        "chart",
-        "charts",
-        "candle",
-        "candles",
-        "ohlc",
-        "history",
-        "historical",
-        "series",
-        "timeseries",
-        "timeSeries",
-        "priceHistory",
-        "chartData",
-        "data"
-    ]
-
-    for name in targets:
-
-        symbol = find_symbol(
-            symbols,
-            name
-        )
-
-        if not symbol:
-
-            print()
-            print(name, "NOT FOUND")
-            continue
-
-        ticker = symbol.get("ticker")
-
-        info = get_info(ticker)
-
-        print()
-        print(name)
-        print("Ticker:", ticker)
-
-        if not info:
-
-            print("INFO FAILED")
-            continue
-
-        found = []
-
-        for key, value in info.items():
-
-            key_lower = str(key).lower()
-
-            for keyword in keywords:
-
-                if keyword.lower() in key_lower:
-
-                    found.append(key)
-
-                    break
-
-        if found:
-
-            print(
-                "Possible chart keys:",
-                found
-            )
-
-            for key in found:
-
-                try:
-
-                    print(
-                        "\nKEY:",
-                        key
-                    )
-
-                    print(
-                        json.dumps(
-                            info.get(key),
-                            ensure_ascii=False,
-                            indent=2
-                        )[:3000]
-                    )
-
-                except:
-
-                    print(
-                        str(info.get(key))[:3000]
-                    )
-
-        else:
-
-            print(
-                "کلید واضحی برای Chart/Candle پیدا نشد."
-            )
-
-
-# =========================================================
-# MAIN
-# =========================================================
-
-def main():
-
-    print()
-    print("=" * 70)
-    print("IRAN OPTIONS SCANNER")
-    print("=" * 70)
-
-    print(
-        "تاریخ امروز:",
-        today_jalali()
+    info = get_info(
+        symbol["ticker"]
     )
 
-    # -----------------------------------------------------
-    # GET SYMBOLS
-    # -----------------------------------------------------
+    return get_price(info)
 
-    try:
 
-        symbols = get_all_symbols()
+# =========================================================
+# SCAN OPTIONS
+# =========================================================
 
-    except Exception as e:
-
-        print(
-            "ERROR GETTING SYMBOLS:",
-            e
-        )
-
-        return
-
-    print(
-        "تعداد کل نمادها:",
-        len(symbols)
-    )
-
-    # -----------------------------------------------------
-    # FIND ACTIVE OPTIONS
-    # -----------------------------------------------------
+def scan_options(symbols):
 
     options = []
 
     for symbol in symbols:
 
-        name = symbol.get("name", "")
+        name = symbol.get(
+            "name",
+            ""
+        )
 
         description = symbol.get(
             "description",
@@ -706,25 +455,17 @@ def main():
         ):
             continue
 
-        symbol_data = {
+        options.append({
             **symbol,
             **parsed
-        }
-
-        options.append(
-            symbol_data
-        )
+        })
 
     print(
         "اختیارهای فعال پیدا شده:",
         len(options)
     )
 
-    # -----------------------------------------------------
-    # UNDERLYING PRICES
-    # -----------------------------------------------------
-
-    underlyings = [
+    underlying_names = [
         "خودرو",
         "اهرم",
         "شستا",
@@ -736,25 +477,18 @@ def main():
     print()
     print("قیمت پایه‌ها:")
 
-    for underlying in underlyings:
+    for name in underlying_names:
 
         price = get_underlying_price(
             symbols,
-            underlying
+            name
         )
 
-        underlying_prices[
-            underlying
-        ] = price
+        underlying_prices[name] = price
 
         print(
-            f"  {underlying}:",
-            price
+            f"  {name}: {price}"
         )
-
-    # -----------------------------------------------------
-    # SCAN OPTIONS
-    # -----------------------------------------------------
 
     candidates = []
 
@@ -781,16 +515,16 @@ def main():
         if not underlying_price:
             continue
 
-        ticker = option.get(
-            "ticker"
+        info = get_info(
+            option["ticker"]
         )
-
-        info = get_info(ticker)
 
         if not info:
             continue
 
-        option_price = get_price(info)
+        option_price = get_price(
+            info
+        )
 
         if option_price is None:
             continue
@@ -798,7 +532,9 @@ def main():
         if option_price < MIN_OPTION_PRICE:
             continue
 
-        volume = get_volume(info)
+        volume = get_volume(
+            info
+        )
 
         if volume < MIN_VOLUME:
             continue
@@ -823,64 +559,34 @@ def main():
             calc["tv_percent"]
         )
 
-        candidate = {
+        candidates.append({
 
             "name": name,
-            "ticker": ticker,
-
+            "ticker": option["ticker"],
             "underlying": underlying,
+            "underlying_price": underlying_price,
+            "strike": option["strike"],
+            "price": option_price,
+            "volume": volume,
+            "expiry": option["expiry"],
+            "type": option["type"],
+            "intrinsic": calc["intrinsic"],
+            "time_value": calc["time_value"],
+            "tv_percent": calc["tv_percent"],
+            "distance": calc["distance"],
+            "moneyness": calc["moneyness"],
+            "score": score
 
-            "underlying_price":
-                underlying_price,
+        })
 
-            "strike":
-                option["strike"],
+    return candidates
 
-            "price":
-                option_price,
 
-            "volume":
-                volume,
+# =========================================================
+# PRINT OPTIONS
+# =========================================================
 
-            "expiry":
-                option["expiry"],
-
-            "type":
-                option["type"],
-
-            "intrinsic":
-                calc["intrinsic"],
-
-            "time_value":
-                calc["time_value"],
-
-            "tv_percent":
-                calc["tv_percent"],
-
-            "distance":
-                calc["distance"],
-
-            "moneyness":
-                calc["moneyness"],
-
-            "score":
-                score
-
-        }
-
-        candidates.append(
-            candidate
-        )
-
-    print()
-    print(
-        "قراردادهای قابل بررسی:",
-        len(candidates)
-    )
-
-    # -----------------------------------------------------
-    # SORT
-    # -----------------------------------------------------
+def print_options(candidates):
 
     calls = [
         x for x in candidates
@@ -892,27 +598,21 @@ def main():
         if x["type"] == "PUT"
     ]
 
+    key_func = lambda x: (
+        x["score"],
+        x["volume"],
+        -x["distance"]
+    )
+
     calls.sort(
-        key=lambda x: (
-            x["score"],
-            x["volume"],
-            -x["distance"]
-        ),
+        key=key_func,
         reverse=True
     )
 
     puts.sort(
-        key=lambda x: (
-            x["score"],
-            x["volume"],
-            -x["distance"]
-        ),
+        key=key_func,
         reverse=True
     )
-
-    # -----------------------------------------------------
-    # PRINT CALLS
-    # -----------------------------------------------------
 
     print()
     print(
@@ -942,10 +642,6 @@ def main():
                 f" Exp={x['expiry']}"
             )
 
-    # -----------------------------------------------------
-    # PRINT PUTS
-    # -----------------------------------------------------
-
     print()
     print(
         "TOP PUT — اختیار فروش (ط)"
@@ -974,31 +670,375 @@ def main():
                 f" Exp={x['expiry']}"
             )
 
+    return calls, puts
+
+
+# =========================================================
+# NEW:
+# DISCOVER MAX FRONTEND
+# =========================================================
+
+def discover_max_frontend():
+
+    print()
+    print("=" * 70)
+    print("CHARTIX MAX FRONTEND DISCOVERY")
+    print("=" * 70)
+
+    url = (
+        f"{MAX_BASE}/dashboard"
+        f"?chart=BRS0031"
+        f"&type=watch-list"
+    )
+
+    print(
+        "MAX URL:",
+        url
+    )
+
+    try:
+
+        r = session.get(
+            url,
+            timeout=30
+        )
+
+        print(
+            "STATUS:",
+            r.status_code
+        )
+
+        print(
+            "CONTENT TYPE:",
+            r.headers.get(
+                "content-type",
+                ""
+            )
+        )
+
+        if r.status_code != 200:
+
+            print(
+                "MAX page failed."
+            )
+
+            return []
+
+        html = r.text
+
+        print(
+            "HTML SIZE:",
+            len(html)
+        )
+
+        # -------------------------------------------------
+        # Find JS files
+        # -------------------------------------------------
+
+        scripts = re.findall(
+            r'<script[^>]+src=["\']([^"\']+)["\']',
+            html,
+            flags=re.I
+        )
+
+        # modulepreload / preload
+        links = re.findall(
+            r'<link[^>]+href=["\']([^"\']+)["\']',
+            html,
+            flags=re.I
+        )
+
+        js_urls = []
+
+        for src in scripts:
+
+            js_urls.append(
+                urljoin(
+                    MAX_BASE,
+                    src
+                )
+            )
+
+        for href in links:
+
+            if (
+                ".js" in href
+                or "javascript" in href.lower()
+            ):
+
+                js_urls.append(
+                    urljoin(
+                        MAX_BASE,
+                        href
+                    )
+                )
+
+        # remove duplicates
+
+        js_urls = list(
+            dict.fromkeys(
+                js_urls
+            )
+        )
+
+        print()
+        print(
+            "JS FILES FOUND:",
+            len(js_urls)
+        )
+
+        for js in js_urls[:50]:
+
+            print(
+                js
+            )
+
+        return js_urls
+
+    except Exception as e:
+
+        print(
+            "MAX DISCOVERY ERROR:",
+            repr(e)
+        )
+
+        return []
+
+
+# =========================================================
+# SEARCH JAVASCRIPT FOR API ENDPOINTS
+# =========================================================
+
+def inspect_javascript(js_urls):
+
+    print()
+    print("=" * 70)
+    print("SEARCHING CHARTIX JAVASCRIPT FOR CANDLE API")
+    print("=" * 70)
+
+    keywords = [
+
+        "candle",
+        "candles",
+        "ohlc",
+        "history",
+        "historical",
+        "timeframe",
+        "interval",
+        "chartData",
+        "priceHistory",
+        "/api/",
+        "api/",
+        "websocket",
+        "socket"
+
+    ]
+
+    found_count = 0
+
+    for index, js_url in enumerate(
+        js_urls[:50],
+        start=1
+    ):
+
+        try:
+
+            r = session.get(
+                js_url,
+                timeout=30
+            )
+
+            if r.status_code != 200:
+                continue
+
+            text = r.text
+
+            print()
+            print(
+                f"[JS {index}] "
+                f"{len(text)} bytes"
+            )
+
+            # -------------------------------------------------
+            # Extract URLs
+            # -------------------------------------------------
+
+            urls = re.findall(
+                r'https?://[^"\']+',
+                text
+            )
+
+            interesting_urls = []
+
+            for u in urls:
+
+                ul = u.lower()
+
+                if any(
+                    k.lower() in ul
+                    for k in keywords
+                ):
+
+                    interesting_urls.append(
+                        u[:500]
+                    )
+
+            if interesting_urls:
+
+                print(
+                    "POSSIBLE URLS:"
+                )
+
+                for u in list(
+                    dict.fromkeys(
+                        interesting_urls
+                    )
+                )[:30]:
+
+                    print(
+                        " ",
+                        u
+                    )
+
+                    found_count += 1
+
+            # -------------------------------------------------
+            # Extract quoted API-like paths
+            # -------------------------------------------------
+
+            paths = re.findall(
+                r'["\']([^"\']{1,300})["\']',
+                text
+            )
+
+            interesting_paths = []
+
+            for p in paths:
+
+                pl = p.lower()
+
+                if (
+                    any(
+                        k.lower() in pl
+                        for k in keywords
+                    )
+                    and (
+                        "/" in p
+                        or "api" in pl
+                    )
+                ):
+
+                    interesting_paths.append(
+                        p
+                    )
+
+            if interesting_paths:
+
+                print(
+                    "POSSIBLE API PATHS:"
+                )
+
+                unique_paths = list(
+                    dict.fromkeys(
+                        interesting_paths
+                    )
+                )
+
+                for p in unique_paths[:80]:
+
+                    print(
+                        " ",
+                        p[:500]
+                    )
+
+                    found_count += 1
+
+        except Exception as e:
+
+            print(
+                "JS ERROR:",
+                js_url,
+                repr(e)
+            )
+
+    print()
+    print(
+        "DISCOVERY HITS:",
+        found_count
+    )
+
+
+# =========================================================
+# MAIN
+# =========================================================
+
+def main():
+
+    print()
+    print("=" * 70)
+    print("IRAN OPTIONS SCANNER")
+    print("=" * 70)
+
+    print(
+        "تاریخ امروز:",
+        today_jalali()
+    )
+
     # -----------------------------------------------------
-    # TEST CURRENT INFO
+    # SYMBOLS
     # -----------------------------------------------------
 
-    inspect_chart_keys(
+    try:
+
+        symbols = get_all_symbols()
+
+    except Exception as e:
+
+        print(
+            "ERROR GETTING SYMBOLS:",
+            repr(e)
+        )
+
+        return
+
+    print(
+        "تعداد کل نمادها:",
+        len(symbols)
+    )
+
+    # -----------------------------------------------------
+    # OPTIONS
+    # -----------------------------------------------------
+
+    candidates = scan_options(
         symbols
     )
 
-    # -----------------------------------------------------
-    # TEST CANDLE ENDPOINTS
-    # -----------------------------------------------------
+    print()
+    print(
+        "قراردادهای قابل بررسی:",
+        len(candidates)
+    )
 
-    test_chart_endpoints(
-        symbols
+    calls, puts = print_options(
+        candidates
     )
 
     # -----------------------------------------------------
-    # FINAL SUMMARY
+    # DISCOVER REAL CHART API
     # -----------------------------------------------------
 
-    final = (
-        calls[:TOP_N]
-        +
-        puts[:TOP_N]
-    )
+    js_urls = discover_max_frontend()
+
+    if js_urls:
+
+        inspect_javascript(
+            js_urls
+        )
+
+    # -----------------------------------------------------
+    # SUMMARY
+    # -----------------------------------------------------
 
     print()
     print("=" * 70)
@@ -1007,17 +1047,27 @@ def main():
 
     print(
         "قراردادهای نهایی:",
-        len(final)
+        len(
+            calls[:TOP_N]
+        )
+        +
+        len(
+            puts[:TOP_N]
+        )
     )
 
     print(
         "CALL:",
-        len(calls[:TOP_N])
+        len(
+            calls[:TOP_N]
+        )
     )
 
     print(
         "PUT:",
-        len(puts[:TOP_N])
+        len(
+            puts[:TOP_N]
+        )
     )
 
     print()
@@ -1025,10 +1075,6 @@ def main():
     print("END")
     print("=" * 70)
 
-
-# =========================================================
-# RUN
-# =========================================================
 
 if __name__ == "__main__":
 
