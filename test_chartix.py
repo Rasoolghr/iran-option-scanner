@@ -1,51 +1,35 @@
 import requests
 import re
 import jdatetime
+import json
 
 BASE = "https://market.chartix.ir"
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+MIN_VOLUME = 50
+MIN_OPTION_PRICE = 10
+MAX_DISTANCE_PERCENT = 10
+ATM_PERCENT = 3
+TOP_N = 5
 
 session = requests.Session()
 session.headers.update(HEADERS)
 
-# =========================
-# تنظیمات اسکنر
-# =========================
 
-MIN_VOLUME = 50
-MIN_OPTION_PRICE = 10
-
-MAX_DISTANCE_PERCENT = 10
-ATM_PERCENT = 3
-
-TOP_N = 5
-
-
-# =========================
-# دریافت همه نمادها
-# =========================
+# ============================================================
+# CHARTIX
+# ============================================================
 
 def get_all_symbols():
-
     r = session.get(
         f"{BASE}/symbol/all",
         timeout=30
     )
-
     r.raise_for_status()
-
     return r.json()["data"]["symbols"]
 
 
-# =========================
-# اطلاعات نماد
-# =========================
-
 def get_info(ticker):
-
     r = session.get(
         f"{BASE}/symbol/info/saham/{ticker}",
         timeout=30
@@ -57,9 +41,33 @@ def get_info(ticker):
     return r.json()
 
 
-# =========================
-# تشخیص CALL / PUT
-# =========================
+# ============================================================
+# DATE
+# ============================================================
+
+def today_jalali():
+    today = jdatetime.date.today()
+    return today.strftime("%Y/%m/%d")
+
+
+def is_active_expiry(expiry):
+    try:
+        expiry_date = jdatetime.datetime.strptime(
+            expiry,
+            "%Y/%m/%d"
+        ).date()
+
+        today = jdatetime.date.today()
+
+        return expiry_date >= today
+
+    except Exception:
+        return False
+
+
+# ============================================================
+# OPTION PARSER
+# ============================================================
 
 def parse_option(description, name):
 
@@ -74,9 +82,11 @@ def parse_option(description, name):
     strike = int(m.group(1))
     expiry = m.group(2)
 
-    # طبق ساختار قراردادهای مورد استفاده در این اسکنر:
-    # ط = اختیار فروش (PUT)
-    # ض = اختیار خرید (CALL)
+    option_type = None
+
+    # طبق دیتای پروژه:
+    # ط = PUT
+    # ض = CALL
 
     if name.startswith("ط"):
         option_type = "PUT"
@@ -84,7 +94,7 @@ def parse_option(description, name):
     elif name.startswith("ض"):
         option_type = "CALL"
 
-    else:
+    if not option_type:
         return None
 
     return {
@@ -94,9 +104,9 @@ def parse_option(description, name):
     }
 
 
-# =========================
-# تشخیص دارایی پایه
-# =========================
+# ============================================================
+# UNDERLYING
+# ============================================================
 
 def get_underlying_name(option_name):
 
@@ -115,188 +125,87 @@ def get_underlying_name(option_name):
     return None
 
 
-# =========================
-# تاریخ امروز شمسی
-# =========================
+# ============================================================
+# VOLUME
+# ============================================================
 
-def today_jalali():
+def get_volume(data):
 
-    today = jdatetime.date.today()
+    volume = 0
 
-    return today.strftime("%Y/%m/%d")
+    for box in data.get("boxes", []):
 
+        title = box.get("title", "")
+        value = box.get("value", "")
 
-# =========================
-# بررسی فعال بودن قرارداد
-# =========================
+        if "حجم معاملات" in title:
 
-def is_active_expiry(expiry):
+            try:
+                volume = float(
+                    str(value)
+                    .replace(",", "")
+                    .replace("٬", "")
+                )
 
-    try:
+            except Exception:
+                volume = 0
 
-        expiry_date = jdatetime.datetime.strptime(
-            expiry,
-            "%Y/%m/%d"
-        ).date()
+            break
 
-        today = jdatetime.date.today()
-
-        return expiry_date >= today
-
-    except Exception:
-
-        return False
+    return volume
 
 
-# =========================
-# محاسبه وضعیت ITM / ATM / OTM
-# =========================
+# ============================================================
+# FIND SYMBOL
+# ============================================================
 
-def calculate_moneyness(
-    option_type,
-    underlying,
-    strike
-):
-
-    distance = (
-        abs(underlying - strike)
-        / underlying
-        * 100
-    )
-
-    if distance <= ATM_PERCENT:
-
-        status = "ATM"
-
-    elif option_type == "CALL":
-
-        if underlying > strike:
-            status = "ITM"
-        else:
-            status = "OTM"
-
-    else:
-
-        if underlying < strike:
-            status = "ITM"
-        else:
-            status = "OTM"
-
-    return distance, status
-
-
-# =========================
-# امتیازدهی
-# =========================
-
-def calculate_score(
-    option_type,
-    distance,
-    status,
-    volume,
-    time_value_percent
-):
-
-    score = 0
-
-    # وضعیت قرارداد
-    if status == "ATM":
-        score += 40
-
-    elif status == "ITM":
-        score += 30
-
-    elif status == "OTM":
-        score += 15
-
-    # فاصله از Strike
-    if distance <= 2:
-        score += 25
-
-    elif distance <= 5:
-        score += 18
-
-    elif distance <= 8:
-        score += 10
-
-    # حجم
-    if volume >= 1000:
-        score += 20
-
-    elif volume >= 500:
-        score += 15
-
-    elif volume >= 100:
-        score += 10
-
-    elif volume >= 50:
-        score += 5
-
-    # Time Value
-    if time_value_percent >= 70:
-        score += 15
-
-    elif time_value_percent >= 50:
-        score += 10
-
-    elif time_value_percent >= 30:
-        score += 5
-
-    return score
-
-
-# =========================
-# MAIN
-# =========================
-
-def main():
-
-    print("=" * 110)
-
-    print(
-        "        IRAN OPTIONS SCANNER"
-    )
-
-    print("=" * 110)
-
-    print(
-        "تاریخ امروز:",
-        today_jalali()
-    )
-
-    print(
-        "\nدر حال دریافت نمادها..."
-    )
-
-    symbols = get_all_symbols()
-
-    options = []
-
-    # =========================
-    # پیدا کردن اختیارهای فعال
-    # =========================
+def find_symbol(symbols, name):
 
     for s in symbols:
 
-        name = s.get(
-            "name",
-            ""
-        )
+        if s.get("name") == name:
+            return s
 
-        description = s.get(
-            "description",
-            ""
-        )
+    return None
 
-        ticker = s.get(
-            "ticker",
-            ""
-        )
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+
+    print("=" * 70)
+    print("IRAN OPTIONS SCANNER")
+    print("=" * 70)
+
+    print("تاریخ امروز:", today_jalali())
+
+    # --------------------------------------------------------
+    # GET SYMBOLS
+    # --------------------------------------------------------
+
+    print("\nدر حال دریافت لیست نمادها...")
+
+    symbols = get_all_symbols()
+
+    print("تعداد کل نمادها:", len(symbols))
+
+    # --------------------------------------------------------
+    # FIND OPTIONS
+    # --------------------------------------------------------
+
+    options = []
+
+    for s in symbols:
+
+        name = s.get("name", "")
+        description = s.get("description", "")
+        ticker = s.get("ticker", "")
 
         if not (
             name.startswith("ط")
-            or
-            name.startswith("ض")
+            or name.startswith("ض")
         ):
             continue
 
@@ -308,118 +217,74 @@ def main():
         if not parsed:
             continue
 
-        # حذف قرارداد منقضی
+        # فقط سررسیدهای فعال
         if not is_active_expiry(
             parsed["expiry"]
         ):
             continue
 
-        underlying = get_underlying_name(
-            name
-        )
+        underlying = get_underlying_name(name)
 
         if not underlying:
             continue
 
         options.append({
-
             "name": name,
             "ticker": ticker,
             "description": description,
             "underlying": underlying,
-
             **parsed
-
         })
 
     print(
-        "\nاختیارهای فعال پیدا شده:",
+        "اختیارهای فعال پیدا شده:",
         len(options)
     )
 
-    # =========================
-    # دریافت اطلاعات قراردادها
-    # =========================
+    # --------------------------------------------------------
+    # GET OPTION DATA
+    # --------------------------------------------------------
 
     results = []
 
-    for i, op in enumerate(
-        options,
-        1
-    ):
+    print("\nدریافت اطلاعات قراردادها...")
+
+    for i, op in enumerate(options, 1):
 
         print(
-            f"\rدریافت اطلاعات {i}/{len(options)}",
+            f"\r{i}/{len(options)}",
             end="",
             flush=True
         )
 
         try:
 
-            d = get_info(
+            data = get_info(
                 op["ticker"]
             )
 
-            if not d:
+            if not data:
                 continue
 
             option_price = float(
-                d.get("price") or 0
+                data.get("price") or 0
             )
 
-            volume = 0
+            volume = get_volume(data)
 
-            # استخراج حجم معاملات
-            for box in d.get(
-                "boxes",
-                []
-            ):
-
-                title = box.get(
-                    "title",
-                    ""
-                )
-
-                value = box.get(
-                    "value",
-                    ""
-                )
-
-                if "حجم معاملات" in title:
-
-                    try:
-
-                        volume = float(
-                            str(value)
-                            .replace(",", "")
-                        )
-
-                    except Exception:
-
-                        volume = 0
-
-            # حذف قیمت خیلی پایین
             if option_price < MIN_OPTION_PRICE:
                 continue
 
-            # حذف حجم خیلی پایین
             if volume < MIN_VOLUME:
                 continue
 
             results.append({
-
-                "name": op["name"],
-                "type": op["type"],
-                "strike": op["strike"],
-                "expiry": op["expiry"],
+                **op,
                 "option_price": option_price,
-                "volume": volume,
-                "underlying": op["underlying"]
-
+                "volume": volume
             })
 
         except Exception:
-
             continue
 
     print("\n")
@@ -429,66 +294,57 @@ def main():
         len(results)
     )
 
-    # =========================
-    # قیمت دارایی‌های پایه
-    # =========================
+    # --------------------------------------------------------
+    # UNDERLYING PRICES
+    # --------------------------------------------------------
 
-    underlying_prices = {}
-
-    targets = [
+    underlying_names = [
         "خودرو",
         "اهرم",
         "شستا",
         "وبملت"
     ]
 
-    for s in symbols:
+    underlying_prices = {}
 
-        name = s.get(
-            "name",
-            ""
-        )
+    print("قیمت پایه‌ها:")
 
-        if name not in targets:
-            continue
+    for name in underlying_names:
 
         try:
 
-            d = get_info(
+            s = find_symbol(
+                symbols,
+                name
+            )
+
+            if not s:
+                continue
+
+            data = get_info(
                 s["ticker"]
             )
 
-            if d:
+            if data:
 
                 price = float(
-                    d.get("price") or 0
+                    data.get("price") or 0
                 )
 
                 if price > 0:
 
-                    underlying_prices[
-                        name
-                    ] = price
+                    underlying_prices[name] = price
+
+                    print(
+                        f"  {name}: {price:g}"
+                    )
 
         except Exception:
+            continue
 
-            pass
-
-    print(
-        "قیمت پایه‌ها:"
-    )
-
-    for name, price in (
-        underlying_prices.items()
-    ):
-
-        print(
-            f"  {name}: {price:.0f}"
-        )
-
-    # =========================
-    # محاسبات نهایی
-    # =========================
+    # --------------------------------------------------------
+    # CALCULATE OPTION METRICS
+    # --------------------------------------------------------
 
     final = []
 
@@ -504,14 +360,11 @@ def main():
             continue
 
         strike = x["strike"]
+        option_price = x["option_price"]
 
-        option_price = (
-            x["option_price"]
-        )
-
-        # =====================
-        # ارزش ذاتی
-        # =====================
+        # ----------------------------------------------------
+        # INTRINSIC VALUE
+        # ----------------------------------------------------
 
         if x["type"] == "CALL":
 
@@ -527,84 +380,130 @@ def main():
                 0
             )
 
-        # =====================
-        # ارزش زمانی
-        # =====================
+        # ----------------------------------------------------
+        # TIME VALUE
+        # ----------------------------------------------------
 
         time_value = (
-            option_price
-            - intrinsic
+            option_price - intrinsic
         )
 
         if time_value <= 0:
             continue
 
         time_value_percent = (
-            time_value
-            / option_price
+            time_value / option_price
         ) * 100
 
-        # =====================
-        # فاصله و وضعیت
-        # =====================
+        # ----------------------------------------------------
+        # DISTANCE FROM STRIKE
+        # ----------------------------------------------------
 
-        distance, moneyness = (
-            calculate_moneyness(
-                x["type"],
-                underlying_price,
-                strike
+        distance_percent = (
+            abs(
+                underlying_price - strike
             )
-        )
+            / underlying_price
+        ) * 100
 
-        # حذف قراردادهای خیلی دور
-        if distance > MAX_DISTANCE_PERCENT:
+        if distance_percent > MAX_DISTANCE_PERCENT:
             continue
 
-        # =====================
-        # Score
-        # =====================
+        # ----------------------------------------------------
+        # MONEYNESS
+        # ----------------------------------------------------
 
-        score = calculate_score(
-            x["type"],
-            distance,
-            moneyness,
-            x["volume"],
-            time_value_percent
-        )
+        if distance_percent <= ATM_PERCENT:
 
-        x["underlying_price"] = (
-            underlying_price
-        )
+            moneyness = "ATM"
 
-        x["intrinsic"] = (
-            intrinsic
-        )
+        elif (
+            x["type"] == "CALL"
+            and underlying_price > strike
+        ) or (
+            x["type"] == "PUT"
+            and underlying_price < strike
+        ):
 
-        x["time_value"] = (
-            time_value
-        )
+            moneyness = "ITM"
 
-        x["time_value_percent"] = (
-            time_value_percent
-        )
+        else:
 
-        x["distance"] = (
-            distance
-        )
+            moneyness = "OTM"
 
-        x["moneyness"] = (
-            moneyness
-        )
+        # ----------------------------------------------------
+        # SCORE
+        # ----------------------------------------------------
 
-        x["score"] = (
-            score
-        )
+        score = 0
+
+        # Moneyness
+        if moneyness == "ATM":
+            score += 40
+
+        elif moneyness == "ITM":
+            score += 30
+
+        else:
+            score += 15
+
+        # Distance
+        if distance_percent <= 2:
+            score += 25
+
+        elif distance_percent <= 5:
+            score += 18
+
+        elif distance_percent <= 8:
+            score += 10
+
+        # Volume
+        if volume := x["volume"]:
+
+            if volume >= 1000:
+                score += 20
+
+            elif volume >= 500:
+                score += 15
+
+            elif volume >= 100:
+                score += 10
+
+            elif volume >= 50:
+                score += 5
+
+        # Time value
+        if time_value_percent >= 70:
+            score += 15
+
+        elif time_value_percent >= 50:
+            score += 10
+
+        elif time_value_percent >= 30:
+            score += 5
+
+        x["underlying_price"] = underlying_price
+        x["intrinsic"] = intrinsic
+        x["time_value"] = time_value
+        x["time_value_percent"] = time_value_percent
+        x["distance_percent"] = distance_percent
+        x["moneyness"] = moneyness
+        x["score"] = score
 
         final.append(x)
 
-    # =========================
-    # تفکیک CALL و PUT
-    # =========================
+    # --------------------------------------------------------
+    # SORT
+    # --------------------------------------------------------
+
+    final.sort(
+        key=lambda x: (
+            x["score"],
+            x["volume"],
+            -x["distance_percent"]
+        ),
+        reverse=True
+    )
 
     calls = [
         x for x in final
@@ -616,149 +515,213 @@ def main():
         if x["type"] == "PUT"
     ]
 
-    # =========================
-    # مرتب‌سازی
-    # =========================
-
-    calls.sort(
-        key=lambda x: (
-            x["score"],
-            x["volume"],
-            -x["distance"]
-        ),
-        reverse=True
-    )
-
-    puts.sort(
-        key=lambda x: (
-            x["score"],
-            x["volume"],
-            -x["distance"]
-        ),
-        reverse=True
-    )
-
-    calls = calls[:TOP_N]
-
-    puts = puts[:TOP_N]
-
-    # =========================
-    # TOP CALL
-    # =========================
+    # --------------------------------------------------------
+    # PRINT TOP CALL
+    # --------------------------------------------------------
 
     print("\n")
+    print("=" * 70)
+    print("TOP CALL — اختیار خرید (ض)")
+    print("=" * 70)
 
-    print("=" * 110)
+    if not calls:
 
-    print(
-        "        TOP CALL — اختیار خرید (ض)"
-    )
+        print("مورد مناسبی پیدا نشد.")
 
-    print("=" * 110)
+    else:
 
-    print(
-        f"{'نماد':<14}"
-        f"{'پایه':<10}"
-        f"{'Strike':<9}"
-        f"{'قیمت':<9}"
-        f"{'فاصله%':<9}"
-        f"{'TV%':<8}"
-        f"{'حجم':<10}"
-        f"{'وضعیت':<8}"
-        f"{'Score':<7}"
-        f"{'سررسید':<12}"
-    )
+        for x in calls[:TOP_N]:
 
-    print("-" * 110)
+            print(
+                f'{x["name"]:<15}'
+                f' پایه={x["underlying"]:<6}'
+                f' پایه={x["underlying_price"]:g} '
+                f'Strike={x["strike"]} '
+                f'Price={x["option_price"]:g} '
+                f'Vol={x["volume"]:g} '
+                f'TV={x["time_value_percent"]:.1f}% '
+                f'{x["moneyness"]:<4} '
+                f'Score={x["score"]} '
+                f'Exp={x["expiry"]}'
+            )
 
-    for x in calls:
-
-        print(
-
-            f"{x['name']:<14}"
-
-            f"{x['underlying_price']:<10.0f}"
-
-            f"{x['strike']:<9}"
-
-            f"{x['option_price']:<9.0f}"
-
-            f"{x['distance']:<9.2f}"
-
-            f"{x['time_value_percent']:<8.1f}"
-
-            f"{x['volume']:<10.0f}"
-
-            f"{x['moneyness']:<8}"
-
-            f"{x['score']:<7}"
-
-            f"{x['expiry']:<12}"
-
-        )
-
-    # =========================
-    # TOP PUT
-    # =========================
+    # --------------------------------------------------------
+    # PRINT TOP PUT
+    # --------------------------------------------------------
 
     print("\n")
+    print("=" * 70)
+    print("TOP PUT — اختیار فروش (ط)")
+    print("=" * 70)
 
-    print("=" * 110)
+    if not puts:
 
-    print(
-        "        TOP PUT — اختیار فروش (ط)"
-    )
+        print("مورد مناسبی پیدا نشد.")
 
-    print("=" * 110)
+    else:
 
-    print(
-        f"{'نماد':<14}"
-        f"{'پایه':<10}"
-        f"{'Strike':<9}"
-        f"{'قیمت':<9}"
-        f"{'فاصله%':<9}"
-        f"{'TV%':<8}"
-        f"{'حجم':<10}"
-        f"{'وضعیت':<8}"
-        f"{'Score':<7}"
-        f"{'سررسید':<12}"
-    )
+        for x in puts[:TOP_N]:
 
-    print("-" * 110)
+            print(
+                f'{x["name"]:<15}'
+                f' پایه={x["underlying"]:<6}'
+                f' پایه={x["underlying_price"]:g} '
+                f'Strike={x["strike"]} '
+                f'Price={x["option_price"]:g} '
+                f'Vol={x["volume"]:g} '
+                f'TV={x["time_value_percent"]:.1f}% '
+                f'{x["moneyness"]:<4} '
+                f'Score={x["score"]} '
+                f'Exp={x["expiry"]}'
+            )
 
-    for x in puts:
-
-        print(
-
-            f"{x['name']:<14}"
-
-            f"{x['underlying_price']:<10.0f}"
-
-            f"{x['strike']:<9}"
-
-            f"{x['option_price']:<9.0f}"
-
-            f"{x['distance']:<9.2f}"
-
-            f"{x['time_value_percent']:<8.1f}"
-
-            f"{x['volume']:<10.0f}"
-
-            f"{x['moneyness']:<8}"
-
-            f"{x['score']:<7}"
-
-            f"{x['expiry']:<12}"
-
-        )
-
-    # =========================
-    # خلاصه
-    # =========================
+    # --------------------------------------------------------
+    # 5-MINUTE DATA DEBUG
+    # --------------------------------------------------------
 
     print("\n")
+    print("=" * 70)
+    print("5-MINUTE DATA TEST")
+    print("=" * 70)
 
-    print("=" * 110)
+    debug_symbols = [
+        "طملت8075",
+        "وبملت"
+    ]
+
+    for debug_name in debug_symbols:
+
+        print("\n" + "-" * 60)
+        print("بررسی:", debug_name)
+
+        try:
+
+            debug_symbol = find_symbol(
+                symbols,
+                debug_name
+            )
+
+            if not debug_symbol:
+
+                print("نماد پیدا نشد")
+                continue
+
+            print(
+                "NAME   :",
+                debug_symbol.get("name")
+            )
+
+            print(
+                "TICKER :",
+                debug_symbol.get("ticker")
+            )
+
+            print(
+                "DESC   :",
+                debug_symbol.get("description")
+            )
+
+            debug_data = get_info(
+                debug_symbol["ticker"]
+            )
+
+            if not debug_data:
+
+                print("اطلاعات دریافت نشد")
+                continue
+
+            print("\nTOP LEVEL KEYS:")
+            print(
+                list(
+                    debug_data.keys()
+                )
+            )
+
+            # ------------------------------------------------
+            # SEARCH POSSIBLE CHART DATA
+            # ------------------------------------------------
+
+            possible_keys = [
+                "chart",
+                "charts",
+                "candle",
+                "candles",
+                "ohlc",
+                "history",
+                "histories",
+                "time",
+                "timestamp",
+                "data"
+            ]
+
+            found = False
+
+            for key, value in debug_data.items():
+
+                key_lower = str(
+                    key
+                ).lower()
+
+                if any(
+                    word in key_lower
+                    for word in possible_keys
+                ):
+
+                    found = True
+
+                    print(
+                        "\nKEY:",
+                        key
+                    )
+
+                    print(
+                        "TYPE:",
+                        type(value).__name__
+                    )
+
+                    try:
+
+                        output = json.dumps(
+                            value,
+                            ensure_ascii=False,
+                            indent=2
+                        )
+
+                    except Exception:
+
+                        output = str(value)
+
+                    if len(output) > 5000:
+
+                        output = (
+                            output[:5000]
+                            + "\n..."
+                        )
+
+                    print(output)
+
+            if not found:
+
+                print(
+                    "\nکلید واضحی برای "
+                    "Chart/Candle پیدا نشد."
+                )
+
+        except Exception as e:
+
+            print(
+                "DEBUG ERROR:",
+                repr(e)
+            )
+
+    # --------------------------------------------------------
+    # FINAL SUMMARY
+    # --------------------------------------------------------
+
+    print("\n")
+    print("=" * 70)
+    print("FINAL SUMMARY")
+    print("=" * 70)
 
     print(
         "قراردادهای نهایی:",
@@ -775,9 +738,8 @@ def main():
         len(puts)
     )
 
-    print("=" * 110)
+    print("=" * 70)
 
 
 if __name__ == "__main__":
-
     main()
