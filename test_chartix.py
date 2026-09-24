@@ -3,8 +3,12 @@ import re
 import jdatetime
 import json
 
+
+# =========================================================
+# SETTINGS
+# =========================================================
+
 BASE = "https://market.chartix.ir"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 MIN_VOLUME = 50
 MIN_OPTION_PRICE = 10
@@ -13,45 +17,69 @@ ATM_PERCENT = 3
 TOP_N = 5
 
 session = requests.Session()
-session.headers.update(HEADERS)
+session.headers.update({
+    "User-Agent": "Mozilla/5.0"
+})
 
 
-# ============================================================
-# CHARTIX
-# ============================================================
+# =========================================================
+# GET ALL SYMBOLS
+# =========================================================
 
 def get_all_symbols():
-    r = session.get(
-        f"{BASE}/symbol/all",
-        timeout=30
-    )
-    r.raise_for_status()
-    return r.json()["data"]["symbols"]
 
+    url = f"{BASE}/symbol/all"
+
+    r = session.get(url, timeout=30)
+    r.raise_for_status()
+
+    data = r.json()
+
+    return data["data"]["symbols"]
+
+
+# =========================================================
+# GET SYMBOL INFO
+# =========================================================
 
 def get_info(ticker):
-    r = session.get(
-        f"{BASE}/symbol/info/saham/{ticker}",
-        timeout=30
-    )
 
-    if r.status_code != 200:
+    url = f"{BASE}/symbol/info/saham/{ticker}"
+
+    try:
+        r = session.get(url, timeout=30)
+
+        if r.status_code != 200:
+            return None
+
+        return r.json()
+
+    except Exception as e:
+
+        print("INFO ERROR:", ticker, e)
+
         return None
 
-    return r.json()
 
-
-# ============================================================
-# DATE
-# ============================================================
+# =========================================================
+# TODAY JALALI
+# =========================================================
 
 def today_jalali():
+
     today = jdatetime.date.today()
+
     return today.strftime("%Y/%m/%d")
 
 
+# =========================================================
+# ACTIVE EXPIRY
+# =========================================================
+
 def is_active_expiry(expiry):
+
     try:
+
         expiry_date = jdatetime.datetime.strptime(
             expiry,
             "%Y/%m/%d"
@@ -62,36 +90,57 @@ def is_active_expiry(expiry):
         return expiry_date >= today
 
     except Exception:
+
         return False
 
 
-# ============================================================
+# =========================================================
+# FIND SYMBOL
+# =========================================================
+
+def find_symbol(symbols, name):
+
+    for s in symbols:
+
+        if s.get("name") == name:
+            return s
+
+    return None
+
+
+# =========================================================
 # OPTION PARSER
-# ============================================================
+# =========================================================
 
 def parse_option(description, name):
 
+    if not description:
+        return None
+
     m = re.search(
         r"-(\d+)-(\d{4}/\d{2}/\d{2})",
-        description or ""
+        description
     )
 
     if not m:
         return None
 
     strike = int(m.group(1))
+
     expiry = m.group(2)
 
     option_type = None
 
-    # طبق دیتای پروژه:
+    # طبق داده پروژه:
     # ط = PUT
     # ض = CALL
 
     if name.startswith("ط"):
+
         option_type = "PUT"
 
     elif name.startswith("ض"):
+
         option_type = "CALL"
 
     if not option_type:
@@ -104,110 +153,545 @@ def parse_option(description, name):
     }
 
 
-# ============================================================
-# UNDERLYING
-# ============================================================
+# =========================================================
+# UNDERLYING MAPPING
+# =========================================================
 
-def get_underlying_name(option_name):
+def underlying_name(option_name):
 
     mapping = {
+
         "خودرو": "خودرو",
         "هرم": "اهرم",
         "ستا": "شستا",
         "ملت": "وبملت"
+
     }
 
     for key, value in mapping.items():
 
-        if key in option_name:
+        if option_name.startswith("ط" + key):
+            return value
+
+        if option_name.startswith("ض" + key):
             return value
 
     return None
 
 
-# ============================================================
-# VOLUME
-# ============================================================
+# =========================================================
+# GET VOLUME
+# =========================================================
 
-def get_volume(data):
+def get_volume(info):
 
-    volume = 0
+    if not info:
+        return 0
 
-    for box in data.get("boxes", []):
+    boxes = info.get("boxes", [])
 
-        title = box.get("title", "")
-        value = box.get("value", "")
+    for box in boxes:
+
+        title = str(box.get("title", ""))
 
         if "حجم معاملات" in title:
 
+            value = box.get("value")
+
             try:
-                volume = float(
+
+                return float(
                     str(value)
                     .replace(",", "")
                     .replace("٬", "")
                 )
 
-            except Exception:
-                volume = 0
+            except:
 
-            break
+                pass
 
-    return volume
-
-
-# ============================================================
-# FIND SYMBOL
-# ============================================================
-
-def find_symbol(symbols, name):
-
-    for s in symbols:
-
-        if s.get("name") == name:
-            return s
-
-    return None
+    return 0
 
 
-# ============================================================
+# =========================================================
+# GET PRICE
+# =========================================================
+
+def get_price(info):
+
+    if not info:
+        return None
+
+    value = info.get("price")
+
+    try:
+
+        return float(value)
+
+    except:
+
+        return None
+
+
+# =========================================================
+# GET UNDERLYING PRICE
+# =========================================================
+
+def get_underlying_price(symbols, underlying):
+
+    symbol = find_symbol(symbols, underlying)
+
+    if not symbol:
+        return None
+
+    ticker = symbol.get("ticker")
+
+    info = get_info(ticker)
+
+    if not info:
+        return None
+
+    return get_price(info)
+
+
+# =========================================================
+# CALCULATE OPTION DATA
+# =========================================================
+
+def calculate_option(option_price, underlying_price, strike, option_type):
+
+    if option_type == "CALL":
+
+        intrinsic = max(
+            underlying_price - strike,
+            0
+        )
+
+    else:
+
+        intrinsic = max(
+            strike - underlying_price,
+            0
+        )
+
+    time_value = option_price - intrinsic
+
+    if option_price <= 0:
+        return None
+
+    if time_value <= 0:
+        return None
+
+    tv_percent = (
+        time_value / option_price
+    ) * 100
+
+    distance = (
+        abs(underlying_price - strike)
+        / underlying_price
+    ) * 100
+
+    # Moneyness
+
+    if distance <= ATM_PERCENT:
+
+        moneyness = "ATM"
+
+    else:
+
+        if option_type == "CALL":
+
+            if underlying_price > strike:
+                moneyness = "ITM"
+            else:
+                moneyness = "OTM"
+
+        else:
+
+            if underlying_price < strike:
+                moneyness = "ITM"
+            else:
+                moneyness = "OTM"
+
+    return {
+
+        "intrinsic": intrinsic,
+        "time_value": time_value,
+        "tv_percent": tv_percent,
+        "distance": distance,
+        "moneyness": moneyness
+
+    }
+
+
+# =========================================================
+# SCORE
+# =========================================================
+
+def calculate_score(
+    moneyness,
+    distance,
+    volume,
+    tv_percent
+):
+
+    score = 0
+
+    # Moneyness
+
+    if moneyness == "ATM":
+
+        score += 40
+
+    elif moneyness == "ITM":
+
+        score += 30
+
+    else:
+
+        score += 15
+
+    # Distance
+
+    if distance <= 2:
+
+        score += 25
+
+    elif distance <= 5:
+
+        score += 18
+
+    elif distance <= 8:
+
+        score += 10
+
+    # Volume
+
+    if volume >= 1000:
+
+        score += 20
+
+    elif volume >= 500:
+
+        score += 15
+
+    elif volume >= 100:
+
+        score += 10
+
+    elif volume >= 50:
+
+        score += 5
+
+    # Time value
+
+    if tv_percent >= 70:
+
+        score += 15
+
+    elif tv_percent >= 50:
+
+        score += 10
+
+    elif tv_percent >= 30:
+
+        score += 5
+
+    return score
+
+
+# =========================================================
+# TEST SYMBOL INFO
+# =========================================================
+
+def test_symbol_info(symbols, names):
+
+    print()
+    print("=" * 70)
+    print("SYMBOL INFO TEST")
+    print("=" * 70)
+
+    for name in names:
+
+        symbol = find_symbol(symbols, name)
+
+        if not symbol:
+
+            print(name, "NOT FOUND")
+            continue
+
+        ticker = symbol.get("ticker")
+
+        info = get_info(ticker)
+
+        print()
+        print(name)
+        print("Ticker:", ticker)
+
+        if not info:
+
+            print("INFO FAILED")
+            continue
+
+        print(
+            "KEYS:",
+            list(info.keys())
+        )
+
+        print(
+            "Price:",
+            info.get("price")
+        )
+
+        print(
+            "Description:",
+            info.get("description")
+        )
+
+
+# =========================================================
+# TEST POSSIBLE CHART ENDPOINTS
+# =========================================================
+
+def test_chart_endpoints(symbols):
+
+    print()
+    print("=" * 70)
+    print("CHARTIX CANDLE ENDPOINT TEST")
+    print("=" * 70)
+
+    symbol = find_symbol(
+        symbols,
+        "وبملت"
+    )
+
+    if not symbol:
+
+        print("وبملت پیدا نشد")
+
+        return
+
+    ticker = symbol.get("ticker")
+
+    print("Ticker:", ticker)
+
+    endpoints = [
+
+        f"/symbol/chart/{ticker}",
+        f"/symbol/charts/{ticker}",
+        f"/symbol/history/{ticker}",
+        f"/symbol/candle/{ticker}",
+        f"/symbol/candles/{ticker}",
+        f"/symbol/ohlc/{ticker}",
+
+        f"/chart/{ticker}",
+        f"/charts/{ticker}",
+        f"/history/{ticker}",
+        f"/candles/{ticker}",
+        f"/ohlc/{ticker}",
+
+    ]
+
+    for endpoint in endpoints:
+
+        url = BASE + endpoint
+
+        try:
+
+            r = session.get(
+                url,
+                timeout=10
+            )
+
+            content_type = r.headers.get(
+                "content-type",
+                ""
+            )
+
+            print()
+            print(
+                f"{endpoint:<45} "
+                f"STATUS={r.status_code} "
+                f"TYPE={content_type}"
+            )
+
+            if r.status_code == 200:
+
+                text = r.text[:2000]
+
+                print("  RESPONSE:")
+                print(text)
+
+        except Exception as e:
+
+            print()
+            print(
+                f"{endpoint:<45} "
+                f"ERROR={e}"
+            )
+
+
+# =========================================================
+# DISCOVER CHART/CANDLE KEYS IN INFO
+# =========================================================
+
+def inspect_chart_keys(symbols):
+
+    print()
+    print("=" * 70)
+    print("CHART DATA KEY INSPECTION")
+    print("=" * 70)
+
+    targets = [
+        "طملت8075",
+        "وبملت"
+    ]
+
+    keywords = [
+        "chart",
+        "charts",
+        "candle",
+        "candles",
+        "ohlc",
+        "history",
+        "historical",
+        "series",
+        "timeseries",
+        "timeSeries",
+        "priceHistory",
+        "chartData",
+        "data"
+    ]
+
+    for name in targets:
+
+        symbol = find_symbol(
+            symbols,
+            name
+        )
+
+        if not symbol:
+
+            print()
+            print(name, "NOT FOUND")
+            continue
+
+        ticker = symbol.get("ticker")
+
+        info = get_info(ticker)
+
+        print()
+        print(name)
+        print("Ticker:", ticker)
+
+        if not info:
+
+            print("INFO FAILED")
+            continue
+
+        found = []
+
+        for key, value in info.items():
+
+            key_lower = str(key).lower()
+
+            for keyword in keywords:
+
+                if keyword.lower() in key_lower:
+
+                    found.append(key)
+
+                    break
+
+        if found:
+
+            print(
+                "Possible chart keys:",
+                found
+            )
+
+            for key in found:
+
+                try:
+
+                    print(
+                        "\nKEY:",
+                        key
+                    )
+
+                    print(
+                        json.dumps(
+                            info.get(key),
+                            ensure_ascii=False,
+                            indent=2
+                        )[:3000]
+                    )
+
+                except:
+
+                    print(
+                        str(info.get(key))[:3000]
+                    )
+
+        else:
+
+            print(
+                "کلید واضحی برای Chart/Candle پیدا نشد."
+            )
+
+
+# =========================================================
 # MAIN
-# ============================================================
+# =========================================================
 
 def main():
 
+    print()
     print("=" * 70)
     print("IRAN OPTIONS SCANNER")
     print("=" * 70)
 
-    print("تاریخ امروز:", today_jalali())
+    print(
+        "تاریخ امروز:",
+        today_jalali()
+    )
 
-    # --------------------------------------------------------
+    # -----------------------------------------------------
     # GET SYMBOLS
-    # --------------------------------------------------------
+    # -----------------------------------------------------
 
-    print("\nدر حال دریافت لیست نمادها...")
+    try:
 
-    symbols = get_all_symbols()
+        symbols = get_all_symbols()
 
-    print("تعداد کل نمادها:", len(symbols))
+    except Exception as e:
 
-    # --------------------------------------------------------
-    # FIND OPTIONS
-    # --------------------------------------------------------
+        print(
+            "ERROR GETTING SYMBOLS:",
+            e
+        )
+
+        return
+
+    print(
+        "تعداد کل نمادها:",
+        len(symbols)
+    )
+
+    # -----------------------------------------------------
+    # FIND ACTIVE OPTIONS
+    # -----------------------------------------------------
 
     options = []
 
-    for s in symbols:
+    for symbol in symbols:
 
-        name = s.get("name", "")
-        description = s.get("description", "")
-        ticker = s.get("ticker", "")
+        name = symbol.get("name", "")
 
-        if not (
-            name.startswith("ط")
-            or name.startswith("ض")
-        ):
-            continue
+        description = symbol.get(
+            "description",
+            ""
+        )
 
         parsed = parse_option(
             description,
@@ -217,88 +701,30 @@ def main():
         if not parsed:
             continue
 
-        # فقط سررسیدهای فعال
         if not is_active_expiry(
             parsed["expiry"]
         ):
             continue
 
-        underlying = get_underlying_name(name)
-
-        if not underlying:
-            continue
-
-        options.append({
-            "name": name,
-            "ticker": ticker,
-            "description": description,
-            "underlying": underlying,
+        symbol_data = {
+            **symbol,
             **parsed
-        })
+        }
+
+        options.append(
+            symbol_data
+        )
 
     print(
         "اختیارهای فعال پیدا شده:",
         len(options)
     )
 
-    # --------------------------------------------------------
-    # GET OPTION DATA
-    # --------------------------------------------------------
-
-    results = []
-
-    print("\nدریافت اطلاعات قراردادها...")
-
-    for i, op in enumerate(options, 1):
-
-        print(
-            f"\r{i}/{len(options)}",
-            end="",
-            flush=True
-        )
-
-        try:
-
-            data = get_info(
-                op["ticker"]
-            )
-
-            if not data:
-                continue
-
-            option_price = float(
-                data.get("price") or 0
-            )
-
-            volume = get_volume(data)
-
-            if option_price < MIN_OPTION_PRICE:
-                continue
-
-            if volume < MIN_VOLUME:
-                continue
-
-            results.append({
-                **op,
-                "option_price": option_price,
-                "volume": volume
-            })
-
-        except Exception:
-            continue
-
-    print("\n")
-
-    print(
-        "قراردادهای قابل بررسی:",
-        len(results)
-    )
-
-    # --------------------------------------------------------
+    # -----------------------------------------------------
     # UNDERLYING PRICES
-    # --------------------------------------------------------
+    # -----------------------------------------------------
 
-    underlying_names = [
+    underlyings = [
         "خودرو",
         "اهرم",
         "شستا",
@@ -307,418 +733,274 @@ def main():
 
     underlying_prices = {}
 
+    print()
     print("قیمت پایه‌ها:")
 
-    for name in underlying_names:
+    for underlying in underlyings:
 
-        try:
+        price = get_underlying_price(
+            symbols,
+            underlying
+        )
 
-            s = find_symbol(
-                symbols,
-                name
-            )
+        underlying_prices[
+            underlying
+        ] = price
 
-            if not s:
-                continue
+        print(
+            f"  {underlying}:",
+            price
+        )
 
-            data = get_info(
-                s["ticker"]
-            )
+    # -----------------------------------------------------
+    # SCAN OPTIONS
+    # -----------------------------------------------------
 
-            if data:
+    candidates = []
 
-                price = float(
-                    data.get("price") or 0
-                )
+    for option in options:
 
-                if price > 0:
+        name = option.get(
+            "name",
+            ""
+        )
 
-                    underlying_prices[name] = price
+        underlying = underlying_name(
+            name
+        )
 
-                    print(
-                        f"  {name}: {price:g}"
-                    )
-
-        except Exception:
+        if not underlying:
             continue
-
-    # --------------------------------------------------------
-    # CALCULATE OPTION METRICS
-    # --------------------------------------------------------
-
-    final = []
-
-    for x in results:
 
         underlying_price = (
             underlying_prices.get(
-                x["underlying"]
+                underlying
             )
         )
 
         if not underlying_price:
             continue
 
-        strike = x["strike"]
-        option_price = x["option_price"]
-
-        # ----------------------------------------------------
-        # INTRINSIC VALUE
-        # ----------------------------------------------------
-
-        if x["type"] == "CALL":
-
-            intrinsic = max(
-                underlying_price - strike,
-                0
-            )
-
-        else:
-
-            intrinsic = max(
-                strike - underlying_price,
-                0
-            )
-
-        # ----------------------------------------------------
-        # TIME VALUE
-        # ----------------------------------------------------
-
-        time_value = (
-            option_price - intrinsic
+        ticker = option.get(
+            "ticker"
         )
 
-        if time_value <= 0:
+        info = get_info(ticker)
+
+        if not info:
             continue
 
-        time_value_percent = (
-            time_value / option_price
-        ) * 100
+        option_price = get_price(info)
 
-        # ----------------------------------------------------
-        # DISTANCE FROM STRIKE
-        # ----------------------------------------------------
-
-        distance_percent = (
-            abs(
-                underlying_price - strike
-            )
-            / underlying_price
-        ) * 100
-
-        if distance_percent > MAX_DISTANCE_PERCENT:
+        if option_price is None:
             continue
 
-        # ----------------------------------------------------
-        # MONEYNESS
-        # ----------------------------------------------------
+        if option_price < MIN_OPTION_PRICE:
+            continue
 
-        if distance_percent <= ATM_PERCENT:
+        volume = get_volume(info)
 
-            moneyness = "ATM"
+        if volume < MIN_VOLUME:
+            continue
 
-        elif (
-            x["type"] == "CALL"
-            and underlying_price > strike
-        ) or (
-            x["type"] == "PUT"
-            and underlying_price < strike
-        ):
+        calc = calculate_option(
+            option_price,
+            underlying_price,
+            option["strike"],
+            option["type"]
+        )
 
-            moneyness = "ITM"
+        if not calc:
+            continue
 
-        else:
+        if calc["distance"] > MAX_DISTANCE_PERCENT:
+            continue
 
-            moneyness = "OTM"
+        score = calculate_score(
+            calc["moneyness"],
+            calc["distance"],
+            volume,
+            calc["tv_percent"]
+        )
 
-        # ----------------------------------------------------
-        # SCORE
-        # ----------------------------------------------------
+        candidate = {
 
-        score = 0
+            "name": name,
+            "ticker": ticker,
 
-        # Moneyness
-        if moneyness == "ATM":
-            score += 40
+            "underlying": underlying,
 
-        elif moneyness == "ITM":
-            score += 30
+            "underlying_price":
+                underlying_price,
 
-        else:
-            score += 15
+            "strike":
+                option["strike"],
 
-        # Distance
-        if distance_percent <= 2:
-            score += 25
+            "price":
+                option_price,
 
-        elif distance_percent <= 5:
-            score += 18
+            "volume":
+                volume,
 
-        elif distance_percent <= 8:
-            score += 10
+            "expiry":
+                option["expiry"],
 
-        # Volume
-        if volume := x["volume"]:
+            "type":
+                option["type"],
 
-            if volume >= 1000:
-                score += 20
+            "intrinsic":
+                calc["intrinsic"],
 
-            elif volume >= 500:
-                score += 15
+            "time_value":
+                calc["time_value"],
 
-            elif volume >= 100:
-                score += 10
+            "tv_percent":
+                calc["tv_percent"],
 
-            elif volume >= 50:
-                score += 5
+            "distance":
+                calc["distance"],
 
-        # Time value
-        if time_value_percent >= 70:
-            score += 15
+            "moneyness":
+                calc["moneyness"],
 
-        elif time_value_percent >= 50:
-            score += 10
+            "score":
+                score
 
-        elif time_value_percent >= 30:
-            score += 5
+        }
 
-        x["underlying_price"] = underlying_price
-        x["intrinsic"] = intrinsic
-        x["time_value"] = time_value
-        x["time_value_percent"] = time_value_percent
-        x["distance_percent"] = distance_percent
-        x["moneyness"] = moneyness
-        x["score"] = score
+        candidates.append(
+            candidate
+        )
 
-        final.append(x)
-
-    # --------------------------------------------------------
-    # SORT
-    # --------------------------------------------------------
-
-    final.sort(
-        key=lambda x: (
-            x["score"],
-            x["volume"],
-            -x["distance_percent"]
-        ),
-        reverse=True
+    print()
+    print(
+        "قراردادهای قابل بررسی:",
+        len(candidates)
     )
 
+    # -----------------------------------------------------
+    # SORT
+    # -----------------------------------------------------
+
     calls = [
-        x for x in final
+        x for x in candidates
         if x["type"] == "CALL"
     ]
 
     puts = [
-        x for x in final
+        x for x in candidates
         if x["type"] == "PUT"
     ]
 
-    # --------------------------------------------------------
-    # PRINT TOP CALL
-    # --------------------------------------------------------
+    calls.sort(
+        key=lambda x: (
+            x["score"],
+            x["volume"],
+            -x["distance"]
+        ),
+        reverse=True
+    )
 
-    print("\n")
-    print("=" * 70)
-    print("TOP CALL — اختیار خرید (ض)")
-    print("=" * 70)
+    puts.sort(
+        key=lambda x: (
+            x["score"],
+            x["volume"],
+            -x["distance"]
+        ),
+        reverse=True
+    )
+
+    # -----------------------------------------------------
+    # PRINT CALLS
+    # -----------------------------------------------------
+
+    print()
+    print(
+        "TOP CALL — اختیار خرید (ض)"
+    )
 
     if not calls:
 
-        print("مورد مناسبی پیدا نشد.")
+        print(
+            "مورد مناسبی پیدا نشد."
+        )
 
     else:
 
         for x in calls[:TOP_N]:
 
             print(
-                f'{x["name"]:<15}'
-                f' پایه={x["underlying"]:<6}'
-                f' پایه={x["underlying_price"]:g} '
-                f'Strike={x["strike"]} '
-                f'Price={x["option_price"]:g} '
-                f'Vol={x["volume"]:g} '
-                f'TV={x["time_value_percent"]:.1f}% '
-                f'{x["moneyness"]:<4} '
-                f'Score={x["score"]} '
-                f'Exp={x["expiry"]}'
+                f"{x['name']:<15}"
+                f" پایه={x['underlying']:<6}"
+                f" پایه={x['underlying_price']:<10}"
+                f" Strike={x['strike']:<8}"
+                f" Price={x['price']:<8}"
+                f" Vol={x['volume']:<8}"
+                f" TV={x['tv_percent']:.1f}% "
+                f"{x['moneyness']:<4}"
+                f" Score={x['score']:<4}"
+                f" Exp={x['expiry']}"
             )
 
-    # --------------------------------------------------------
-    # PRINT TOP PUT
-    # --------------------------------------------------------
+    # -----------------------------------------------------
+    # PRINT PUTS
+    # -----------------------------------------------------
 
-    print("\n")
-    print("=" * 70)
-    print("TOP PUT — اختیار فروش (ط)")
-    print("=" * 70)
+    print()
+    print(
+        "TOP PUT — اختیار فروش (ط)"
+    )
 
     if not puts:
 
-        print("مورد مناسبی پیدا نشد.")
+        print(
+            "مورد مناسبی پیدا نشد."
+        )
 
     else:
 
         for x in puts[:TOP_N]:
 
             print(
-                f'{x["name"]:<15}'
-                f' پایه={x["underlying"]:<6}'
-                f' پایه={x["underlying_price"]:g} '
-                f'Strike={x["strike"]} '
-                f'Price={x["option_price"]:g} '
-                f'Vol={x["volume"]:g} '
-                f'TV={x["time_value_percent"]:.1f}% '
-                f'{x["moneyness"]:<4} '
-                f'Score={x["score"]} '
-                f'Exp={x["expiry"]}'
+                f"{x['name']:<15}"
+                f" پایه={x['underlying']:<6}"
+                f" پایه={x['underlying_price']:<10}"
+                f" Strike={x['strike']:<8}"
+                f" Price={x['price']:<8}"
+                f" Vol={x['volume']:<8}"
+                f" TV={x['tv_percent']:.1f}% "
+                f"{x['moneyness']:<4}"
+                f" Score={x['score']:<4}"
+                f" Exp={x['expiry']}"
             )
 
-    # --------------------------------------------------------
-    # 5-MINUTE DATA DEBUG
-    # --------------------------------------------------------
+    # -----------------------------------------------------
+    # TEST CURRENT INFO
+    # -----------------------------------------------------
 
-    print("\n")
-    print("=" * 70)
-    print("5-MINUTE DATA TEST")
-    print("=" * 70)
+    inspect_chart_keys(
+        symbols
+    )
 
-    debug_symbols = [
-        "طملت8075",
-        "وبملت"
-    ]
+    # -----------------------------------------------------
+    # TEST CANDLE ENDPOINTS
+    # -----------------------------------------------------
 
-    for debug_name in debug_symbols:
+    test_chart_endpoints(
+        symbols
+    )
 
-        print("\n" + "-" * 60)
-        print("بررسی:", debug_name)
-
-        try:
-
-            debug_symbol = find_symbol(
-                symbols,
-                debug_name
-            )
-
-            if not debug_symbol:
-
-                print("نماد پیدا نشد")
-                continue
-
-            print(
-                "NAME   :",
-                debug_symbol.get("name")
-            )
-
-            print(
-                "TICKER :",
-                debug_symbol.get("ticker")
-            )
-
-            print(
-                "DESC   :",
-                debug_symbol.get("description")
-            )
-
-            debug_data = get_info(
-                debug_symbol["ticker"]
-            )
-
-            if not debug_data:
-
-                print("اطلاعات دریافت نشد")
-                continue
-
-            print("\nTOP LEVEL KEYS:")
-            print(
-                list(
-                    debug_data.keys()
-                )
-            )
-
-            # ------------------------------------------------
-            # SEARCH POSSIBLE CHART DATA
-            # ------------------------------------------------
-
-            possible_keys = [
-                "chart",
-                "charts",
-                "candle",
-                "candles",
-                "ohlc",
-                "history",
-                "histories",
-                "time",
-                "timestamp",
-                "data"
-            ]
-
-            found = False
-
-            for key, value in debug_data.items():
-
-                key_lower = str(
-                    key
-                ).lower()
-
-                if any(
-                    word in key_lower
-                    for word in possible_keys
-                ):
-
-                    found = True
-
-                    print(
-                        "\nKEY:",
-                        key
-                    )
-
-                    print(
-                        "TYPE:",
-                        type(value).__name__
-                    )
-
-                    try:
-
-                        output = json.dumps(
-                            value,
-                            ensure_ascii=False,
-                            indent=2
-                        )
-
-                    except Exception:
-
-                        output = str(value)
-
-                    if len(output) > 5000:
-
-                        output = (
-                            output[:5000]
-                            + "\n..."
-                        )
-
-                    print(output)
-
-            if not found:
-
-                print(
-                    "\nکلید واضحی برای "
-                    "Chart/Candle پیدا نشد."
-                )
-
-        except Exception as e:
-
-            print(
-                "DEBUG ERROR:",
-                repr(e)
-            )
-
-    # --------------------------------------------------------
+    # -----------------------------------------------------
     # FINAL SUMMARY
-    # --------------------------------------------------------
+    # -----------------------------------------------------
 
-    print("\n")
+    final = (
+        calls[:TOP_N]
+        +
+        puts[:TOP_N]
+    )
+
+    print()
     print("=" * 70)
     print("FINAL SUMMARY")
     print("=" * 70)
@@ -730,16 +1012,24 @@ def main():
 
     print(
         "CALL:",
-        len(calls)
+        len(calls[:TOP_N])
     )
 
     print(
         "PUT:",
-        len(puts)
+        len(puts[:TOP_N])
     )
 
+    print()
+    print("=" * 70)
+    print("END")
     print("=" * 70)
 
 
+# =========================================================
+# RUN
+# =========================================================
+
 if __name__ == "__main__":
+
     main()
