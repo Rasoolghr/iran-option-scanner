@@ -1,6 +1,5 @@
 import requests
 import re
-from datetime import datetime
 
 BASE = "https://market.chartix.ir"
 
@@ -11,9 +10,9 @@ HEADERS = {
 session = requests.Session()
 session.headers.update(HEADERS)
 
-# -----------------------------
+# =============================
 # SETTINGS
-# -----------------------------
+# =============================
 
 MIN_VOLUME = 50
 MIN_OPTION_PRICE = 10
@@ -21,21 +20,31 @@ MAX_DISTANCE_PERCENT = 10
 ATM_PERCENT = 3
 TOP_N = 5
 
-# -----------------------------
-# API
-# -----------------------------
+
+# =============================
+# GET ALL SYMBOLS
+# =============================
 
 def get_all_symbols():
+
     r = session.get(
         f"{BASE}/symbol/all",
         timeout=30
     )
+
     r.raise_for_status()
+
     return r.json()["data"]["symbols"]
 
 
+# =============================
+# GET SYMBOL INFO
+# =============================
+
 def get_info(ticker):
+
     try:
+
         r = session.get(
             f"{BASE}/symbol/info/saham/{ticker}",
             timeout=30
@@ -47,12 +56,13 @@ def get_info(ticker):
         return r.json()
 
     except Exception:
+
         return None
 
 
-# -----------------------------
-# OPTION PARSER
-# -----------------------------
+# =============================
+# PARSE OPTION
+# =============================
 
 def parse_option(description, name):
 
@@ -68,12 +78,15 @@ def parse_option(description, name):
     expiry = m.group(2)
 
     if name.startswith("ط"):
+
         option_type = "CALL"
 
     elif name.startswith("ض"):
+
         option_type = "PUT"
 
     else:
+
         return None
 
     return {
@@ -83,9 +96,9 @@ def parse_option(description, name):
     }
 
 
-# -----------------------------
-# UNDERLYING
-# -----------------------------
+# =============================
+# FIND UNDERLYING
+# =============================
 
 def get_underlying_name(option_name):
 
@@ -99,36 +112,15 @@ def get_underlying_name(option_name):
     for key, value in mapping.items():
 
         if key in option_name:
+
             return value
 
     return None
 
 
-# -----------------------------
-# DATE
-# -----------------------------
-
-def is_valid_expiry(expiry):
-
-    try:
-
-        expiry_date = datetime.strptime(
-            expiry,
-            "%Y/%m/%d"
-        )
-
-        today = datetime.now()
-
-        return expiry_date >= today
-
-    except Exception:
-
-        return False
-
-
-# -----------------------------
-# VOLUME
-# -----------------------------
+# =============================
+# GET VOLUME
+# =============================
 
 def get_volume(data):
 
@@ -156,74 +148,100 @@ def get_volume(data):
     return volume
 
 
-# -----------------------------
+# =============================
 # SCORE
-# -----------------------------
+# =============================
 
-def calculate_score(distance, volume, tv_percent):
+def calculate_score(
+    distance,
+    volume,
+    tv_percent
+):
 
     score = 0
 
-    # Distance
+    # -------------------------
+    # Distance from ATM
+    # -------------------------
 
     if distance <= 2:
+
         score += 45
 
     elif distance <= 3:
+
         score += 40
 
     elif distance <= 5:
+
         score += 30
 
     elif distance <= 7:
+
         score += 20
 
     elif distance <= 10:
+
         score += 10
 
+    # -------------------------
     # Volume
+    # -------------------------
 
     if volume >= 2000:
+
         score += 35
 
     elif volume >= 1000:
+
         score += 30
 
     elif volume >= 500:
+
         score += 25
 
     elif volume >= 200:
+
         score += 20
 
     elif volume >= 100:
+
         score += 15
 
     elif volume >= 50:
+
         score += 10
 
+    # -------------------------
     # Time Value
+    # -------------------------
 
     if tv_percent >= 80:
+
         score += 20
 
     elif tv_percent >= 60:
+
         score += 18
 
     elif tv_percent >= 40:
+
         score += 15
 
     elif tv_percent >= 20:
+
         score += 10
 
     else:
+
         score += 5
 
     return score
 
 
-# -----------------------------
+# =============================
 # MAIN
-# -----------------------------
+# =============================
 
 def main():
 
@@ -232,6 +250,10 @@ def main():
     symbols = get_all_symbols()
 
     options = []
+
+    # =========================
+    # FIND OPTIONS
+    # =========================
 
     for s in symbols:
 
@@ -243,6 +265,7 @@ def main():
             name.startswith("ط")
             or name.startswith("ض")
         ):
+
             continue
 
         parsed = parse_option(
@@ -251,35 +274,39 @@ def main():
         )
 
         if not parsed:
+
             continue
 
-        # حذف سررسید گذشته
-        if not is_valid_expiry(
-            parsed["expiry"]
-        ):
-            continue
-
-        underlying = get_underlying_name(name)
+        underlying = get_underlying_name(
+            name
+        )
 
         if not underlying:
+
             continue
 
         options.append({
+
             "name": name,
+
             "ticker": ticker,
+
             "description": description,
+
             "underlying": underlying,
+
             **parsed
+
         })
 
     print(
-        "اختیارهای فعال پیدا شده:",
+        "اختیارهای پیدا شده:",
         len(options)
     )
 
-    # -------------------------
+    # =========================
     # GET OPTION DATA
-    # -------------------------
+    # =========================
 
     results = []
 
@@ -296,6 +323,7 @@ def main():
         )
 
         if not data:
+
             continue
 
         try:
@@ -310,30 +338,41 @@ def main():
 
         volume = get_volume(data)
 
-        # فیلتر اولیه
+        # ---------------------
+        # BASIC FILTER
+        # ---------------------
+
         if price < MIN_OPTION_PRICE:
+
             continue
 
         if volume < MIN_VOLUME:
+
             continue
 
         results.append({
 
             "name": op["name"],
+
             "type": op["type"],
+
             "strike": op["strike"],
+
             "expiry": op["expiry"],
+
             "underlying": op["underlying"],
+
             "option_price": price,
+
             "volume": volume
 
         })
 
     print("\n")
 
-    # -------------------------
+    # =========================
     # UNDERLYING PRICES
-    # -------------------------
+    # =========================
 
     underlying_prices = {}
 
@@ -347,6 +386,7 @@ def main():
             "شستا",
             "وبملت"
         ]:
+
             continue
 
         data = get_info(
@@ -354,6 +394,7 @@ def main():
         )
 
         if not data:
+
             continue
 
         try:
@@ -374,9 +415,9 @@ def main():
             f"  {name}: {price:.0f}"
         )
 
-    # -------------------------
-    # CALCULATE
-    # -------------------------
+    # =========================
+    # CALCULATE OPTION METRICS
+    # =========================
 
     final = []
 
@@ -387,12 +428,16 @@ def main():
         )
 
         if not underlying_price:
+
             continue
 
         strike = x["strike"]
+
         option_price = x["option_price"]
 
-        # Intrinsic
+        # ---------------------
+        # INTRINSIC VALUE
+        # ---------------------
 
         if x["type"] == "CALL":
 
@@ -408,43 +453,57 @@ def main():
                 0
             )
 
-        # Time Value
+        # ---------------------
+        # TIME VALUE
+        # ---------------------
 
         time_value = (
             option_price - intrinsic
         )
 
         if time_value <= 0:
+
             continue
 
         tv_percent = (
             time_value / option_price
         ) * 100
 
-        # Distance
+        # ---------------------
+        # DISTANCE
+        # ---------------------
 
         distance_percent = (
+
             abs(
                 underlying_price - strike
             )
             / underlying_price
+
         ) * 100
 
         if distance_percent > MAX_DISTANCE_PERCENT:
+
             continue
 
-        # Moneyness
+        # ---------------------
+        # MONEYNESS
+        # ---------------------
 
         if distance_percent <= ATM_PERCENT:
 
             moneyness = "ATM"
 
         elif (
+
             x["type"] == "CALL"
             and underlying_price > strike
+
         ) or (
+
             x["type"] == "PUT"
             and underlying_price < strike
+
         ):
 
             moneyness = "ITM"
@@ -453,64 +512,97 @@ def main():
 
             moneyness = "OTM"
 
-        # Score
+        # ---------------------
+        # SCORE
+        # ---------------------
 
         score = calculate_score(
+
             distance_percent,
+
             x["volume"],
+
             tv_percent
+
         )
 
         x["underlying_price"] = underlying_price
+
         x["intrinsic"] = intrinsic
+
         x["time_value"] = time_value
+
         x["tv_percent"] = tv_percent
+
         x["distance_percent"] = distance_percent
+
         x["moneyness"] = moneyness
+
         x["score"] = score
 
         final.append(x)
 
-    # -------------------------
-    # SORT
-    # -------------------------
+    # =========================
+    # CALL / PUT
+    # =========================
 
     calls = [
+
         x for x in final
+
         if x["type"] == "CALL"
+
     ]
 
     puts = [
+
         x for x in final
+
         if x["type"] == "PUT"
+
     ]
 
+    # =========================
+    # SORT
+    # =========================
+
     calls.sort(
+
         key=lambda x: (
+
             x["score"],
+
             x["volume"],
+
             -x["distance_percent"]
+
         ),
+
         reverse=True
+
     )
 
     puts.sort(
+
         key=lambda x: (
+
             x["score"],
+
             x["volume"],
+
             -x["distance_percent"]
+
         ),
+
         reverse=True
+
     )
 
-    # -------------------------
-    # OUTPUT
-    # -------------------------
+    # =========================
+    # PRINT TABLE
+    # =========================
 
-    def print_table(
-        title,
-        data
-    ):
+    def print_table(title, data):
 
         print("=" * 125)
 
@@ -521,16 +613,27 @@ def main():
         print("=" * 125)
 
         print(
+
             f"{'نماد':<12}"
+
             f"{'پایه':<9}"
+
             f"{'Strike':<8}"
+
             f"{'قیمت':<8}"
+
             f"{'فاصله%':<9}"
+
             f"{'TV%':<8}"
+
             f"{'حجم':<10}"
+
             f"{'وضعیت':<8}"
+
             f"{'Score':<7}"
+
             f"{'سررسید':<12}"
+
         )
 
         print("-" * 125)
@@ -560,6 +663,10 @@ def main():
                 f"{x['expiry']:<12}"
 
             )
+
+    # =========================
+    # OUTPUT
+    # =========================
 
     print_table(
         "TOP CALL",
@@ -597,5 +704,10 @@ def main():
     print("=" * 125)
 
 
+# =============================
+# RUN
+# =============================
+
 if __name__ == "__main__":
+
     main()
