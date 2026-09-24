@@ -2,7 +2,8 @@ import requests
 import re
 import jdatetime
 import json
-from urllib.parse import urljoin
+import time
+from datetime import datetime, timedelta
 
 
 # =========================================================
@@ -10,13 +11,16 @@ from urllib.parse import urljoin
 # =========================================================
 
 BASE = "https://market.chartix.ir"
-MAX_BASE = "https://max.chartix.ir"
+
+DATAFEED_BASE = "https://datafeed.chartix.ir/api/v1"
 
 MIN_VOLUME = 50
 MIN_OPTION_PRICE = 10
 MAX_DISTANCE_PERCENT = 10
 ATM_PERCENT = 3
 TOP_N = 5
+
+CANDLE_COUNT = 300
 
 session = requests.Session()
 
@@ -182,10 +186,12 @@ def parse_option(description, name):
 def underlying_name(option_name):
 
     mapping = {
+
         "خودرو": "خودرو",
         "هرم": "اهرم",
         "ستا": "شستا",
         "ملت": "وبملت"
+
     }
 
     for key, value in mapping.items():
@@ -335,11 +341,13 @@ def calculate_option(
         )
 
     return {
+
         "intrinsic": intrinsic,
         "time_value": time_value,
         "tv_percent": tv_percent,
         "distance": distance,
         "moneyness": moneyness
+
     }
 
 
@@ -357,49 +365,62 @@ def calculate_score(
     score = 0
 
     if moneyness == "ATM":
+
         score += 40
 
     elif moneyness == "ITM":
+
         score += 30
 
     else:
+
         score += 15
 
     if distance <= 2:
+
         score += 25
 
     elif distance <= 5:
+
         score += 18
 
     elif distance <= 8:
+
         score += 10
 
     if volume >= 1000:
+
         score += 20
 
     elif volume >= 500:
+
         score += 15
 
     elif volume >= 100:
+
         score += 10
 
     elif volume >= 50:
+
         score += 5
 
     if tv_percent >= 70:
+
         score += 15
 
     elif tv_percent >= 50:
+
         score += 10
 
     elif tv_percent >= 30:
+
         score += 5
 
     return score
 
 
 # =========================================================
-# FIND UNDERLYING PRICE
+# UNDERLYING PRICE
 # =========================================================
 
 def get_underlying_price(
@@ -466,10 +487,12 @@ def scan_options(symbols):
     )
 
     underlying_names = [
+
         "خودرو",
         "اهرم",
         "شستا",
         "وبملت"
+
     ]
 
     underlying_prices = {}
@@ -674,33 +697,26 @@ def print_options(candidates):
 
 
 # =========================================================
-# NEW:
-# DISCOVER MAX FRONTEND
+# GET CHARTIX DATAFEED SERVER
 # =========================================================
 
-def discover_max_frontend():
+def get_datafeed_server():
 
     print()
     print("=" * 70)
-    print("CHARTIX MAX FRONTEND DISCOVERY")
+    print("CHARTIX DATAFEED SERVER")
     print("=" * 70)
 
     url = (
-        f"{MAX_BASE}/dashboard"
-        f"?chart=BRS0031"
-        f"&type=watch-list"
-    )
-
-    print(
-        "MAX URL:",
-        url
+        "https://info.chartix.ir"
+        "/api/v1/get-server"
     )
 
     try:
 
         r = session.get(
             url,
-            timeout=30
+            timeout=20
         )
 
         print(
@@ -716,256 +732,467 @@ def discover_max_frontend():
             )
         )
 
+        print(
+            "RESPONSE:"
+        )
+
+        print(
+            r.text[:3000]
+        )
+
         if r.status_code != 200:
 
+            return None
+
+        try:
+
+            data = r.json()
+
+            print()
             print(
-                "MAX page failed."
+                "JSON:"
             )
-
-            return []
-
-        html = r.text
-
-        print(
-            "HTML SIZE:",
-            len(html)
-        )
-
-        # -------------------------------------------------
-        # Find JS files
-        # -------------------------------------------------
-
-        scripts = re.findall(
-            r'<script[^>]+src=["\']([^"\']+)["\']',
-            html,
-            flags=re.I
-        )
-
-        # modulepreload / preload
-        links = re.findall(
-            r'<link[^>]+href=["\']([^"\']+)["\']',
-            html,
-            flags=re.I
-        )
-
-        js_urls = []
-
-        for src in scripts:
-
-            js_urls.append(
-                urljoin(
-                    MAX_BASE,
-                    src
-                )
-            )
-
-        for href in links:
-
-            if (
-                ".js" in href
-                or "javascript" in href.lower()
-            ):
-
-                js_urls.append(
-                    urljoin(
-                        MAX_BASE,
-                        href
-                    )
-                )
-
-        # remove duplicates
-
-        js_urls = list(
-            dict.fromkeys(
-                js_urls
-            )
-        )
-
-        print()
-        print(
-            "JS FILES FOUND:",
-            len(js_urls)
-        )
-
-        for js in js_urls[:50]:
 
             print(
-                js
+                json.dumps(
+                    data,
+                    ensure_ascii=False,
+                    indent=2
+                )[:5000]
             )
 
-        return js_urls
+            return data
+
+        except:
+
+            return r.text
 
     except Exception as e:
 
         print(
-            "MAX DISCOVERY ERROR:",
+            "SERVER ERROR:",
             repr(e)
         )
 
-        return []
+        return None
 
 
 # =========================================================
-# SEARCH JAVASCRIPT FOR API ENDPOINTS
+# TEST SYMBOL API
 # =========================================================
 
-def inspect_javascript(js_urls):
+def test_datafeed_symbol(ticker):
 
     print()
-    print("=" * 70)
-    print("SEARCHING CHARTIX JAVASCRIPT FOR CANDLE API")
-    print("=" * 70)
+    print(
+        "-" * 70
+    )
 
-    keywords = [
+    print(
+        "DATAFEED SYMBOL:",
+        ticker
+    )
 
-        "candle",
-        "candles",
-        "ohlc",
-        "history",
-        "historical",
-        "timeframe",
-        "interval",
-        "chartData",
-        "priceHistory",
-        "/api/",
-        "api/",
-        "websocket",
-        "socket"
+    url = (
+        f"{DATAFEED_BASE}/symbols"
+        f"?symbol={ticker}"
+    )
 
-    ]
+    try:
 
-    found_count = 0
+        r = session.get(
+            url,
+            timeout=20
+        )
 
-    for index, js_url in enumerate(
-        js_urls[:50],
-        start=1
-    ):
+        print(
+            "URL:",
+            url
+        )
+
+        print(
+            "STATUS:",
+            r.status_code
+        )
+
+        print(
+            "RESPONSE:"
+        )
+
+        print(
+            r.text[:3000]
+        )
+
+        if r.status_code == 200:
+
+            try:
+
+                return r.json()
+
+            except:
+
+                return None
+
+    except Exception as e:
+
+        print(
+            "SYMBOL ERROR:",
+            repr(e)
+        )
+
+    return None
+
+
+# =========================================================
+# GET 5 MINUTE HISTORY
+# =========================================================
+
+def get_history(
+    ticker,
+    countback=CANDLE_COUNT
+):
+
+    print()
+    print(
+        "-" * 70
+    )
+
+    print(
+        "5 MINUTE HISTORY:",
+        ticker
+    )
+
+    now = int(
+        time.time()
+    )
+
+    # حدود 7 روز
+    from_time = int(
+        (
+            datetime.utcnow()
+            - timedelta(days=7)
+        ).timestamp()
+    )
+
+    to_time = now
+
+    resolution = "5"
+
+    # id فعلاً یک شناسه ساده
+    # برای تست History
+    socket_id = str(
+        int(
+            time.time() * 1000
+        )
+    )
+
+    params = {
+
+        "symbol": ticker,
+
+        "resolution":
+            resolution,
+
+        "from":
+            from_time,
+
+        "to":
+            to_time,
+
+        "countback":
+            countback,
+
+        "id":
+            socket_id,
+
+        "adj":
+            "0"
+
+    }
+
+    url = (
+        f"{DATAFEED_BASE}/history"
+    )
+
+    print(
+        "URL:",
+        url
+    )
+
+    print(
+        "PARAMS:"
+    )
+
+    print(
+        json.dumps(
+            params,
+            ensure_ascii=False,
+            indent=2
+        )
+    )
+
+    try:
+
+        r = session.get(
+            url,
+            params=params,
+            timeout=30
+        )
+
+        print()
+        print(
+            "STATUS:",
+            r.status_code
+        )
+
+        print(
+            "FINAL URL:",
+            r.url
+        )
+
+        print()
+        print(
+            "RAW RESPONSE:"
+        )
+
+        print(
+            r.text[:5000]
+        )
+
+        if r.status_code != 200:
+
+            return None
 
         try:
 
-            r = session.get(
-                js_url,
-                timeout=30
-            )
-
-            if r.status_code != 200:
-                continue
-
-            text = r.text
+            data = r.json()
 
             print()
             print(
-                f"[JS {index}] "
-                f"{len(text)} bytes"
+                "JSON STRUCTURE:"
             )
 
-            # -------------------------------------------------
-            # Extract URLs
-            # -------------------------------------------------
-
-            urls = re.findall(
-                r'https?://[^"\']+',
-                text
-            )
-
-            interesting_urls = []
-
-            for u in urls:
-
-                ul = u.lower()
-
-                if any(
-                    k.lower() in ul
-                    for k in keywords
-                ):
-
-                    interesting_urls.append(
-                        u[:500]
-                    )
-
-            if interesting_urls:
+            if isinstance(
+                data,
+                dict
+            ):
 
                 print(
-                    "POSSIBLE URLS:"
+                    list(
+                        data.keys()
+                    )
                 )
 
-                for u in list(
-                    dict.fromkeys(
-                        interesting_urls
-                    )
-                )[:30]:
-
-                    print(
-                        " ",
-                        u
-                    )
-
-                    found_count += 1
-
-            # -------------------------------------------------
-            # Extract quoted API-like paths
-            # -------------------------------------------------
-
-            paths = re.findall(
-                r'["\']([^"\']{1,300})["\']',
-                text
-            )
-
-            interesting_paths = []
-
-            for p in paths:
-
-                pl = p.lower()
-
-                if (
-                    any(
-                        k.lower() in pl
-                        for k in keywords
-                    )
-                    and (
-                        "/" in p
-                        or "api" in pl
-                    )
-                ):
-
-                    interesting_paths.append(
-                        p
-                    )
-
-            if interesting_paths:
+            elif isinstance(
+                data,
+                list
+            ):
 
                 print(
-                    "POSSIBLE API PATHS:"
+                    "LIST LENGTH:",
+                    len(data)
                 )
 
-                unique_paths = list(
-                    dict.fromkeys(
-                        interesting_paths
-                    )
-                )
-
-                for p in unique_paths[:80]:
-
-                    print(
-                        " ",
-                        p[:500]
-                    )
-
-                    found_count += 1
+            return data
 
         except Exception as e:
 
             print(
-                "JS ERROR:",
-                js_url,
+                "JSON PARSE ERROR:",
                 repr(e)
             )
 
+    except Exception as e:
+
+        print(
+            "HISTORY ERROR:",
+            repr(e)
+        )
+
+    return None
+
+
+# =========================================================
+# PARSE HISTORY
+# =========================================================
+
+def inspect_history(data):
+
+    if not data:
+
+        print(
+            "هیچ دیتای کندلی دریافت نشد."
+        )
+
+        return
+
     print()
     print(
-        "DISCOVERY HITS:",
-        found_count
+        "=" * 70
     )
+    print(
+        "HISTORY STRUCTURE"
+    )
+    print(
+        "=" * 70
+    )
+
+    if isinstance(
+        data,
+        dict
+    ):
+
+        for key, value in data.items():
+
+            print()
+            print(
+                "KEY:",
+                key
+            )
+
+            if isinstance(
+                value,
+                list
+            ):
+
+                print(
+                    "TYPE: LIST"
+                )
+
+                print(
+                    "LENGTH:",
+                    len(value)
+                )
+
+                if value:
+
+                    print(
+                        "FIRST:"
+                    )
+
+                    print(
+                        json.dumps(
+                            value[0],
+                            ensure_ascii=False,
+                            indent=2
+                        )[:2000]
+                    )
+
+                    print(
+                        "LAST:"
+                    )
+
+                    print(
+                        json.dumps(
+                            value[-1],
+                            ensure_ascii=False,
+                            indent=2
+                        )[:2000]
+                    )
+
+            else:
+
+                print(
+                    "TYPE:",
+                    type(value).__name__
+                )
+
+                print(
+                    str(value)[:2000]
+                )
+
+    elif isinstance(
+        data,
+        list
+    ):
+
+        print(
+            "LIST LENGTH:",
+            len(data)
+        )
+
+        for item in data[:3]:
+
+            print(
+                json.dumps(
+                    item,
+                    ensure_ascii=False,
+                    indent=2
+                )[:2000]
+            )
+
+
+# =========================================================
+# TEST SELECTED SYMBOLS
+# =========================================================
+
+def test_history_symbols(symbols):
+
+    print()
+    print("=" * 70)
+    print(
+        "5-MINUTE CANDLE TEST"
+    )
+    print("=" * 70)
+
+    names = [
+
+        "وبملت",
+        "خودرو",
+        "شستا",
+        "اهرم",
+        "طملت8075",
+        "طستا8061"
+
+    ]
+
+    for name in names:
+
+        symbol = find_symbol(
+            symbols,
+            name
+        )
+
+        if not symbol:
+
+            print()
+            print(
+                name,
+                "NOT FOUND"
+            )
+
+            continue
+
+        ticker = symbol.get(
+            "ticker"
+        )
+
+        print()
+        print(
+            "===================================="
+        )
+
+        print(
+            name,
+            "=>",
+            ticker
+        )
+
+        # symbol info from datafeed
+
+        test_datafeed_symbol(
+            ticker
+        )
+
+        # history
+
+        data = get_history(
+            ticker
+        )
+
+        inspect_history(
+            data
+        )
 
 
 # =========================================================
@@ -976,7 +1203,9 @@ def main():
 
     print()
     print("=" * 70)
-    print("IRAN OPTIONS SCANNER")
+    print(
+        "IRAN OPTIONS SCANNER"
+    )
     print("=" * 70)
 
     print(
@@ -1007,7 +1236,7 @@ def main():
     )
 
     # -----------------------------------------------------
-    # OPTIONS
+    # OPTION SCAN
     # -----------------------------------------------------
 
     candidates = scan_options(
@@ -1025,16 +1254,18 @@ def main():
     )
 
     # -----------------------------------------------------
-    # DISCOVER REAL CHART API
+    # DATAFEED SERVER
     # -----------------------------------------------------
 
-    js_urls = discover_max_frontend()
+    get_datafeed_server()
 
-    if js_urls:
+    # -----------------------------------------------------
+    # REAL 5 MINUTE HISTORY
+    # -----------------------------------------------------
 
-        inspect_javascript(
-            js_urls
-        )
+    test_history_symbols(
+        symbols
+    )
 
     # -----------------------------------------------------
     # SUMMARY
@@ -1042,7 +1273,9 @@ def main():
 
     print()
     print("=" * 70)
-    print("FINAL SUMMARY")
+    print(
+        "FINAL SUMMARY"
+    )
     print("=" * 70)
 
     print(
@@ -1072,7 +1305,9 @@ def main():
 
     print()
     print("=" * 70)
-    print("END")
+    print(
+        "END"
+    )
     print("=" * 70)
 
 
